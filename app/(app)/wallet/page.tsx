@@ -4,9 +4,11 @@ import { CoinLifecyclePanel } from "@/components/coin/CoinLifecyclePanel";
 import { loadStore, saveStore } from "@/lib/storage";
 import { QRCodeSVG } from "qrcode.react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function WalletPage() {
+  const router = useRouter();
   const [store, setStore] = useState(() => loadStore());
   const [scannedWallet, setScannedWallet] = useState("");
   const user = store.users.find((u) => u.id === store.currentUserId);
@@ -22,9 +24,12 @@ export default function WalletPage() {
       <h1 className="text-2xl font-bold">Wallet</h1>
       <p className="text-sm">Wallet address: {user.walletAddress}</p>
       <p className="text-sm">Total value: {total} ms</p>
+      <CoinLifecyclePanel />
       <div className="space-y-2 rounded border border-slate-700 p-3">
         <p className="text-xs text-slate-300">Scan simulation / paste wallet</p>
         <input
+          id="scannedWallet"
+          name="scannedWallet"
           className="w-full rounded bg-slate-800 p-2 text-sm"
           value={scannedWallet}
           onChange={(e) => setScannedWallet(e.target.value)}
@@ -42,12 +47,20 @@ export default function WalletPage() {
       <section className="space-y-2 rounded border border-slate-700 p-3">
         <h3 className="text-sm font-semibold">Coin Voting</h3>
         {myCoins.map((coin) => (
-          <div key={coin.id} className="rounded bg-slate-800 p-2 text-xs">
+          <div
+            key={coin.id}
+            className="cursor-pointer rounded bg-slate-800 p-2 text-xs hover:bg-slate-700"
+            onClick={() =>
+              router.push(`/coin-review?coinId=${encodeURIComponent(coin.id)}&jobId=${encodeURIComponent(coin.sourceJobId)}`)
+            }
+          >
             <div>{coin.id.slice(0, 12)}... ({coin.amountMs} ms)</div>
+            <div className="mt-1 text-[10px] text-cyan-300">Click coin to open smart contract details</div>
             <div className="mt-1 flex gap-2">
               <button
                 className="rounded bg-green-700 px-2 py-1"
-                onClick={() => {
+                onClick={(event) => {
+                  event.stopPropagation();
                   const coins = store.coins.map((c) =>
                     c.id === coin.id ? { ...c, votesWork: (c.votesWork ?? 0) + 1 } : c,
                   );
@@ -60,7 +73,8 @@ export default function WalletPage() {
               </button>
               <button
                 className="rounded bg-red-700 px-2 py-1"
-                onClick={() => {
+                onClick={(event) => {
+                  event.stopPropagation();
                   const coins = store.coins.map((c) =>
                     c.id === coin.id ? { ...c, votesNoWork: (c.votesNoWork ?? 0) + 1 } : c,
                   );
@@ -75,7 +89,6 @@ export default function WalletPage() {
           </div>
         ))}
       </section>
-      <CoinLifecyclePanel />
     </main>
   );
 }

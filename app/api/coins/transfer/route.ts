@@ -12,15 +12,16 @@ export async function POST(req: Request) {
   } = payload;
 
   if (adminDb) {
-    const replayDoc = adminDb.collection("offline_events").doc(eventId);
+    const db = adminDb;
+    const replayDoc = db.collection("offline_events").doc(eventId);
     const replaySnap = await replayDoc.get();
     if (replaySnap.exists) {
       return NextResponse.json({ ok: true, replayed: true, transfer: replaySnap.data() });
     }
 
     if (sourceCoinId && senderWallet && recipientWallet && Number(amountMs) > 0) {
-      await adminDb.runTransaction(async (tx) => {
-        const coinRef = adminDb.collection("coins").doc(sourceCoinId);
+      await db.runTransaction(async (tx) => {
+        const coinRef = db.collection("coins").doc(sourceCoinId);
         const coinSnap = await tx.get(coinRef);
         if (!coinSnap.exists) throw new Error("Source coin not found");
         const coin = coinSnap.data() as { amountMs: number; ownerWallet: string; status: string };
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
         if (coin.amountMs < Number(amountMs)) throw new Error("Insufficient coin amount");
 
         tx.update(coinRef, { amountMs: coin.amountMs - Number(amountMs) });
-        const childRef = adminDb.collection("coins").doc();
+        const childRef = db.collection("coins").doc();
         tx.set(childRef, {
           ...coin,
           id: childRef.id,
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
           status: "pending_review",
           bornAt: Date.now(),
         });
-        const transferRef = adminDb.collection("coin_transfers").doc();
+        const transferRef = db.collection("coin_transfers").doc();
         tx.set(transferRef, {
           id: transferRef.id,
           senderWallet,

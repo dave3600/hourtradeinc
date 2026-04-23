@@ -43,7 +43,23 @@ export function loadStore(): Store {
 
 export function saveStore(next: Store) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(KEY, JSON.stringify(next));
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    // Fall back to a slimmed payload if storage quota is exceeded.
+    const slimmed: Store = {
+      ...next,
+      photos: next.photos.map((photo) => ({
+        ...photo,
+        dataUrl: photo.dataUrl ? photo.dataUrl.slice(0, 4096) : "",
+      })),
+    };
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(slimmed));
+    } catch {
+      // Ignore final failure; in-memory state may still continue for this session.
+    }
+  }
 }
 
 export function randomUsername() {

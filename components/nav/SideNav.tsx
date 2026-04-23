@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { loadStore, saveStore } from "@/lib/storage";
 
 type Props = {
   open: boolean;
@@ -8,6 +10,14 @@ type Props = {
 };
 
 export function SideNav({ open, onClose }: Props) {
+  const router = useRouter();
+  const logout = () => {
+    const store = loadStore();
+    saveStore({ ...store, currentUserId: undefined });
+    onClose();
+    router.push("/signin");
+  };
+
   if (!open) return null;
   return (
     <aside className="fixed inset-0 z-20 bg-black/50" onClick={onClose}>
@@ -32,6 +42,12 @@ export function SideNav({ open, onClose }: Props) {
           <Link className="block rounded bg-slate-800 p-2" href="/profile">
             Profile
           </Link>
+          <button
+            className="block w-full rounded bg-red-600 p-2 text-left"
+            onClick={logout}
+          >
+            Log Out
+          </button>
         </div>
       </nav>
     </aside>

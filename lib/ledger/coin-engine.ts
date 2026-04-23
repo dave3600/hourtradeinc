@@ -1,5 +1,8 @@
-import { createId } from "../storage";
 import type { Coin, CoinTransfer } from "../models";
+
+function createId(prefix: string) {
+  return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
+}
 
 export function mintCoinFromJob(input: {
   ownerId: string;

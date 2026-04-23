@@ -3,8 +3,17 @@ import { generateMnemonic } from "bip39";
 import { Wallet } from "ethers";
 import { matchClipToUsers } from "@/lib/biometric/match-service";
 import { adminDb } from "@/lib/firebase/admin";
-import { createId, randomUsername } from "@/lib/storage";
 import type { UserProfile } from "@/lib/models";
+
+function createUserId() {
+  return `user_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+function randomUsername() {
+  const words = ["Green", "Sky", "Iron", "Nova", "River", "Seed", "Solar"];
+  const animals = ["Falcon", "Otter", "Wolf", "Fox", "Whale", "Tiger"];
+  return `${words[Math.floor(Math.random() * words.length)]}${animals[Math.floor(Math.random() * animals.length)]}${Math.floor(Math.random() * 1000)}`;
+}
 
 export async function POST(req: Request) {
   const { clip, users = [] } = await req.json();
@@ -14,7 +23,7 @@ export async function POST(req: Request) {
   let created = false;
   if (!matchedUser) {
     matchedUser = {
-      id: createId("user"),
+      id: createUserId(),
       walletAddress: Wallet.createRandom().address,
       username: randomUsername(),
       seedPhrase: generateMnemonic(),

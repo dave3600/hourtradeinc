@@ -32,10 +32,10 @@ export default function MarketplacePage() {
   return (
     <main className="min-h-screen space-y-4 bg-slate-950 p-4 text-white">
       <h1 className="text-2xl font-bold">Marketplace</h1>
-      <input className="w-full rounded bg-slate-800 p-2" placeholder="Title" value={title} onChange={(e)=>setTitle(e.target.value)} />
-      <textarea className="w-full rounded bg-slate-800 p-2" placeholder="Description" value={description} onChange={(e)=>setDescription(e.target.value)} />
-      <input className="w-full rounded bg-slate-800 p-2" type="number" value={priceMs} onChange={(e)=>setPriceMs(Number(e.target.value))} />
-      <input className="w-full rounded bg-slate-800 p-2" placeholder="Approx location" value={location} onChange={(e)=>setLocation(e.target.value)} />
+      <input id="listingTitle" name="listingTitle" className="w-full rounded bg-slate-800 p-2" placeholder="Title" value={title} onChange={(e)=>setTitle(e.target.value)} />
+      <textarea id="listingDescription" name="listingDescription" className="w-full rounded bg-slate-800 p-2" placeholder="Description" value={description} onChange={(e)=>setDescription(e.target.value)} />
+      <input id="listingPriceMs" name="listingPriceMs" className="w-full rounded bg-slate-800 p-2" type="number" value={priceMs} onChange={(e)=>setPriceMs(Number(e.target.value))} />
+      <input id="listingLocation" name="listingLocation" className="w-full rounded bg-slate-800 p-2" placeholder="Approx location" value={location} onChange={(e)=>setLocation(e.target.value)} />
       <button className="rounded bg-cyan-500 px-4 py-2 text-black" onClick={list}>Post Listing</button>
       <div className="space-y-2">
         {store.listings.map((l) => (

@@ -2,6 +2,9 @@ export type UserProfile = {
   id: string;
   walletAddress: string;
   username: string;
+  email?: string;
+  /** SHA-256 hex of `${email}|${password}` for email sign-in (client-side only). */
+  emailPasswordDigest?: string;
   seedPhrase: string;
   createdAt: string;
   bio?: string;

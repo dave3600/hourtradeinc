@@ -5,13 +5,17 @@ import { SideNav } from "@/components/nav/SideNav";
 import { loadStore, saveStore } from "@/lib/storage";
 import { dequeueAllEvents, enqueueOfflineEvent } from "@/lib/offline/event-queue";
 import { makeIdempotencyKey } from "@/lib/security/webauthn-vault";
+import { useRouter } from "next/navigation";
 
 export default function CameraPage() {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [store, setStore] = useState(() => loadStore());
   const [flip, setFlip] = useState(false);
   const [now, setNow] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -21,6 +25,9 @@ export default function CameraPage() {
     [store.jobs, user?.id],
   );
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
     const online = () => setIsOnline(true);
@@ -78,9 +85,9 @@ export default function CameraPage() {
     const expiring = store.photos.filter(
       (p) =>
         p.storagePath &&
-        p.storageUrl &&
-        p.signedUrlExpiresAt &&
-        p.signedUrlExpiresAt - nowTs < refreshSoonThresholdMs,
+        (!p.storageUrl ||
+          !p.signedUrlExpiresAt ||
+          p.signedUrlExpiresAt - nowTs < refreshSoonThresholdMs),
     );
     if (expiring.length === 0) return;
 
@@ -135,6 +142,7 @@ export default function CameraPage() {
 
   const clockIn = async () => {
     if (!user || activeJob) return;
+    setError(null);
     const locationStart = await getLocationString();
     const clockInResponse = await fetch("/api/jobs/clock-in", {
       method: "POST",
@@ -145,6 +153,10 @@ export default function CameraPage() {
         locationStart,
       }),
     });
+    if (!clockInResponse.ok) {
+      setError("Clock in failed. Please try again.");
+      return;
+    }
     const data = await clockInResponse.json();
     const serverJob = data.job;
     const nextStore = {
@@ -160,10 +172,12 @@ export default function CameraPage() {
 
   const capture = async () => {
     if (!activeJob || !user) return;
+    setError(null);
     const location = await getLocationString();
     const canvas = canvasRef.current;
     const video = videoRef.current;
     let imageDataUrl: string | undefined;
+    let previewDataUrl: string | undefined;
     if (canvas && video && video.videoWidth > 0 && video.videoHeight > 0) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -171,6 +185,16 @@ export default function CameraPage() {
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         imageDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        const previewCanvas = document.createElement("canvas");
+        const previewWidth = 320;
+        const previewHeight = Math.max(180, Math.floor((video.videoHeight / video.videoWidth) * previewWidth));
+        previewCanvas.width = previewWidth;
+        previewCanvas.height = previewHeight;
+        const previewCtx = previewCanvas.getContext("2d");
+        if (previewCtx) {
+          previewCtx.drawImage(video, 0, 0, previewWidth, previewHeight);
+          previewDataUrl = previewCanvas.toDataURL("image/jpeg", 0.5);
+        }
       }
     }
     const res = await fetch("/api/photos", {
@@ -184,6 +208,10 @@ export default function CameraPage() {
         location,
       }),
     });
+    if (!res.ok) {
+      setError("Capture failed. Please try again.");
+      return;
+    }
     const data = await res.json();
     const nextPhotos = [...store.photos, {
       id: data.id,
@@ -191,7 +219,7 @@ export default function CameraPage() {
       userId: user.id,
       timestamp: Date.now(),
       elapsedMs: elapsed,
-      dataUrl: data.dataUrl,
+      dataUrl: previewDataUrl ?? imageDataUrl ?? data.dataUrl ?? "",
       storagePath: data.storagePath ?? undefined,
       storageUrl: data.storageUrl ?? undefined,
       signedUrlExpiresAt: data.signedUrlExpiresAt ?? undefined,
@@ -208,6 +236,7 @@ export default function CameraPage() {
 
   const clockOut = async () => {
     if (!activeJob || !user) return;
+    setError(null);
     const finalElapsed = Date.now() - activeJob.startedAt;
     const locationEnd = await getLocationString();
     const closedJob = {
@@ -223,6 +252,10 @@ export default function CameraPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId: user.id, job: closedJob, wallet: user.walletAddress }),
     }).then(async (r) => {
+      if (!r.ok) {
+        setError("Clock out failed. Please try again.");
+        return;
+      }
       const data = await r.json();
       const nextStore = {
         ...store,
@@ -231,6 +264,9 @@ export default function CameraPage() {
       };
       saveStore(nextStore);
       setStore(nextStore);
+      if (data.coin?.id) {
+        router.push(`/coin-review?coinId=${encodeURIComponent(data.coin.id)}&jobId=${encodeURIComponent(closedJob.id)}`);
+      }
     });
     if (!isOnline) {
       await enqueueOfflineEvent({
@@ -247,7 +283,17 @@ export default function CameraPage() {
     }
   };
 
-  const photos = store.photos.filter((p) => p.jobId === activeJob?.id);
+  const latestJobId = [...store.jobs]
+    .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt))[0]?.id;
+  const shownJobId = activeJob?.id ?? latestJobId;
+  const photos = store.photos.filter((p) => p.jobId === shownJobId);
+  if (!mounted) {
+    return (
+      <main className="min-h-screen bg-slate-950 p-4 text-white">
+        Loading camera...
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -290,6 +336,11 @@ export default function CameraPage() {
             Offline mode: progress is cached and will sync when online.
           </p>
         )}
+        {error && (
+          <p className="rounded bg-red-500/20 p-2 text-center text-xs text-red-200">
+            {error}
+          </p>
+        )}
         <p className="text-center text-2xl font-mono">{elapsed} ms</p>
         <div className="flex justify-center gap-3">
           <button className="rounded bg-green-500 px-4 py-2 font-semibold text-black" onClick={clockIn}>
@@ -314,12 +365,25 @@ export default function CameraPage() {
                 setStore(nextStore);
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                alt="proof thumbnail"
-                src={photo.storageUrl ?? photo.dataUrl}
-                className="h-16 w-full rounded object-cover"
-              />
+              {photo.storageUrl || photo.dataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  alt="proof thumbnail"
+                  src={photo.dataUrl || photo.storageUrl}
+                  onError={(event) => {
+                    const fallback = photo.storageUrl || photo.dataUrl || "";
+                    const target = event.currentTarget;
+                    if (fallback && target.src !== fallback) {
+                      target.src = fallback;
+                    }
+                  }}
+                  className="h-16 w-full rounded object-cover"
+                />
+              ) : (
+                <div className="flex h-16 w-full items-center justify-center rounded bg-slate-700 text-[10px] text-slate-300">
+                  placeholder
+                </div>
+              )}
               <div>{new Date(photo.timestamp).toLocaleTimeString()}</div>
               <div>{photo.elapsedMs} ms</div>
               <div className="truncate text-[10px] text-slate-400">{photo.location ?? "unknown"}</div>
