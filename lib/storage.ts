@@ -1,5 +1,6 @@
 "use client";
 
+import { firebaseAuth } from "@/lib/firebase/client";
 import { v4 as uuidv4 } from "uuid";
 import type {
   Coin,
@@ -92,11 +93,15 @@ export function saveStore(next: Store) {
     }
   }
 
-  const current = next.currentUserId ? next.users.find((u) => u.id === next.currentUserId) : undefined;
-  const firebaseUid = current?.firebaseUid;
-  if (firebaseUid) {
+  const authUser = firebaseAuth.currentUser;
+  const profile = next.currentUserId ? next.users.find((u) => u.id === next.currentUserId) : undefined;
+  if (
+    authUser &&
+    profile &&
+    (profile.id === authUser.uid || profile.firebaseUid === authUser.uid)
+  ) {
     void import("@/lib/firebase/cloud-store").then(({ scheduleCloudPush }) => {
-      scheduleCloudPush(next, firebaseUid);
+      scheduleCloudPush(authUser.uid);
     });
   }
 

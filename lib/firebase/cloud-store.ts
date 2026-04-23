@@ -1,4 +1,3 @@
-import { doc, getDoc, setDoc } from "firebase/firestore";
 import type {
   Coin,
   CoinTransfer,
@@ -8,10 +7,8 @@ import type {
   Message,
   UserProfile,
 } from "@/lib/models";
-import { firebaseAuth, firestore } from "@/lib/firebase/client";
+import { firebaseAuth } from "@/lib/firebase/client";
 import type { Store } from "@/lib/storage";
-
-const COLLECTION = "userStores";
 
 function deepStripUndefined<T>(value: T): T {
   if (value === null || typeof value !== "object") return value;
@@ -35,17 +32,24 @@ export type UserCloudSlice = {
 };
 
 function findSyncedUser(store: Store, firebaseUid: string): UserProfile | undefined {
-  return store.users.find((u) => u.firebaseUid === firebaseUid || u.id === firebaseUid);
+  const authUid = firebaseAuth.currentUser?.uid;
+  return store.users.find(
+    (u) =>
+      u.firebaseUid === firebaseUid ||
+      u.id === firebaseUid ||
+      (authUid === firebaseUid && store.currentUserId === u.id),
+  );
 }
 
-/** Shrink photos for Firestore 1 MiB doc limit: prefer storage refs over embedded data URLs. */
+/**
+ * Firestore docs are capped (~1 MiB). Never upload full camera data URLs — keep storage refs only
+ * so cross-device push reliably succeeds.
+ */
 function photoForCloud(p: JobPhoto): JobPhoto {
-  if (p.storagePath || p.storageUrl) {
-    return { ...p, dataUrl: "" };
-  }
-  const cap = 8192;
-  const d = p.dataUrl ?? "";
-  return { ...p, dataUrl: d.length > cap ? `${d.slice(0, cap)}…` : d };
+  return {
+    ...p,
+    dataUrl: "",
+  };
 }
 
 function mergeById<T extends { id: string }>(local: T[], remote: T[], prefer: (a: T, b: T) => T): T[] {
@@ -182,21 +186,41 @@ export function mergeCloudSliceIntoStore(store: Store, firebaseUid: string, remo
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPushSerialized = "";
 
-export function scheduleCloudPush(store: Store, firebaseUid: string): void {
+/** Clear debounce + dedupe after logout so the next session can push. */
+export function resetCloudSyncState() {
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = null;
+  lastPushSerialized = "";
+}
+
+/** Debounced upload of the latest localStorage store for this Firebase user. */
+export function scheduleCloudPush(firebaseUid: string): void {
   if (typeof window === "undefined" || !navigator.onLine) return;
   if (!firebaseUid || firebaseAuth.currentUser?.uid !== firebaseUid) return;
 
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    void pushUserCloudSliceNow(store, firebaseUid);
+    void pushUserCloudSliceNow(firebaseUid);
   }, 1200);
 }
 
-async function pushUserCloudSliceNow(store: Store, firebaseUid: string): Promise<void> {
-  if (!navigator.onLine) return;
-  if (firebaseAuth.currentUser?.uid !== firebaseUid) return;
+/** Upload immediately (cancels pending debounced push). Always reads fresh `loadStore()`. */
+export async function flushCloudPushNow(firebaseUid: string): Promise<void> {
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
+  await pushUserCloudSliceNow(firebaseUid);
+}
 
+async function pushUserCloudSliceNow(firebaseUid: string): Promise<void> {
+  if (!navigator.onLine) return;
+  const authUser = firebaseAuth.currentUser;
+  if (!authUser || authUser.uid !== firebaseUid) return;
+
+  const { loadStore } = await import("@/lib/storage");
+  const store = loadStore();
   const slice = buildUserCloudSlice(store, firebaseUid);
   if (!slice) return;
 
@@ -206,20 +230,48 @@ async function pushUserCloudSliceNow(store: Store, firebaseUid: string): Promise
 
   try {
     const payload = deepStripUndefined(slice) as unknown as Record<string, unknown>;
-    await setDoc(doc(firestore, COLLECTION, firebaseUid), payload, { merge: true });
-  } catch {
+    const token = await authUser.getIdToken();
+    const res = await fetch("/api/user-store", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ slice: payload }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`${res.status} ${errText}`);
+    }
+  } catch (e) {
     lastPushSerialized = "";
+    const msg = e instanceof Error ? e.message : String(e);
+    const hint = msg.includes("503")
+      ? "Vercel must set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY (Admin) so /api/user-store can write."
+      : "Check network and sign-in; open /api/user-store response in Network tab if this persists.";
+    console.warn(`[hOurTrade] Cloud sync (userStores via server) failed — ${hint}`, e);
   }
 }
 
 export async function pullAndMergeCloudStore(firebaseUid: string): Promise<Store | null> {
   if (typeof window === "undefined" || !navigator.onLine) return null;
-  if (!firebaseUid || firebaseAuth.currentUser?.uid !== firebaseUid) return null;
+  const authUser = firebaseAuth.currentUser;
+  if (!firebaseUid || !authUser || authUser.uid !== firebaseUid) return null;
 
-  const snap = await getDoc(doc(firestore, COLLECTION, firebaseUid));
-  if (!snap.exists()) return null;
+  let raw: Record<string, unknown>;
+  try {
+    const token = await authUser.getIdToken();
+    const res = await fetch("/api/user-store", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { exists?: boolean; data?: Record<string, unknown> };
+    if (!json.exists || !json.data) return null;
+    raw = json.data;
+  } catch {
+    return null;
+  }
 
-  const raw = snap.data() as Record<string, unknown>;
   const remote = parseRemote(raw);
   if (!remote) return null;
 

@@ -1,6 +1,6 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import type { UserProfile } from "@/lib/models";
-import { firestore } from "@/lib/firebase/client";
+import { firebaseAuth, firestore } from "@/lib/firebase/client";
 import { generateMnemonic } from "bip39";
 import { loadStore, randomUsername, walletId } from "@/lib/storage";
 
@@ -45,6 +45,10 @@ function docToUserProfile(uid: string, d: Record<string, unknown>, emailFromAuth
 
 /** Load profile after Firebase sign-in: Firestore first, then local store, then new defaults. */
 export async function resolveFirebaseEmailProfile(uid: string, emailFromAuth: string | null): Promise<UserProfile> {
+  const authUser = firebaseAuth.currentUser;
+  if (authUser?.uid === uid) {
+    await authUser.getIdToken();
+  }
   const snap = await getDoc(doc(firestore, USERS, uid));
   if (snap.exists()) {
     return docToUserProfile(uid, snap.data() as Record<string, unknown>, emailFromAuth);
@@ -77,6 +81,9 @@ export async function resolveFirebaseEmailProfile(uid: string, emailFromAuth: st
 
 export async function persistFirebaseEmailProfile(user: UserProfile): Promise<void> {
   const uid = user.firebaseUid ?? user.id;
+  const authUser = firebaseAuth.currentUser;
+  if (!authUser || authUser.uid !== uid) return;
+  await authUser.getIdToken();
   await setDoc(doc(firestore, USERS, uid), firestoreUserPayload({ ...user, id: uid, firebaseUid: uid }), {
     merge: true,
   });

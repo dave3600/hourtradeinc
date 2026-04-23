@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SideNav } from "@/components/nav/SideNav";
+import { firebaseAuth } from "@/lib/firebase/client";
 import { saveStore } from "@/lib/storage";
 import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { dequeueAllEvents, enqueueOfflineEvent } from "@/lib/offline/event-queue";
@@ -261,6 +262,14 @@ export default function CameraPage() {
         coins: data.coin ? [...store.coins, data.coin] : store.coins,
       };
       saveStore(nextStore);
+      const authUid = firebaseAuth.currentUser?.uid;
+      if (
+        authUid &&
+        (user.id === authUid || user.firebaseUid === authUid)
+      ) {
+        const { flushCloudPushNow } = await import("@/lib/firebase/cloud-store");
+        await flushCloudPushNow(authUid);
+      }
       if (data.coin?.id) {
         router.push(`/coin-review?coinId=${encodeURIComponent(data.coin.id)}&jobId=${encodeURIComponent(closedJob.id)}`);
       }

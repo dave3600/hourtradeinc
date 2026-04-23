@@ -20,7 +20,7 @@ function maybeInitAdminApp(): App | null {
   });
 }
 
-const adminApp = maybeInitAdminApp();
+export const adminApp = maybeInitAdminApp();
 
 export const adminDb = adminApp ? getFirestore(adminApp) : null;
 export const adminStorage = adminApp ? getStorage(adminApp) : null;
