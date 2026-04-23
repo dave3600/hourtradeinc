@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signOut } from "firebase/auth";
+import { firebaseAuth } from "@/lib/firebase/client";
 import { loadStore, saveStore } from "@/lib/storage";
 
 type Props = {
@@ -12,6 +14,7 @@ type Props = {
 export function SideNav({ open, onClose }: Props) {
   const router = useRouter();
   const logout = () => {
+    void signOut(firebaseAuth).catch(() => {});
     const store = loadStore();
     saveStore({ ...store, currentUserId: undefined });
     onClose();

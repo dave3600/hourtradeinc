@@ -2,8 +2,16 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  createUserWithEmailAndPassword,
+  fetchSignInMethodsForEmail,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { createId, loadStore, randomUsername, saveStore, walletId } from "@/lib/storage";
 import { generateMnemonic } from "bip39";
+import { firebaseAuth } from "@/lib/firebase/client";
+import { persistFirebaseEmailProfile, resolveFirebaseEmailProfile } from "@/lib/firebase/email-profile";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -13,9 +21,6 @@ export default function SignInPage() {
   const [emailInput, setEmailInput] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
   const [emailForgot, setEmailForgot] = useState(false);
-  const [forgotSeed, setForgotSeed] = useState("");
-  const [forgotNewPassword, setForgotNewPassword] = useState("");
-  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
 
@@ -136,15 +141,49 @@ export default function SignInPage() {
     completeAuth(newUser, true);
   };
 
-  const emailPasswordDigest = async (email: string, password: string) => {
-    const enc = new TextEncoder();
-    const buf = await crypto.subtle.digest("SHA-256", enc.encode(`${email}|${password}`));
-    return Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+  const firebaseEmailReady = () =>
+    Boolean(
+      process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
+        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN &&
+        process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
+        process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    );
+
+  const firebaseAuthErrorMessage = (code: string | undefined) => {
+    switch (code) {
+      case "auth/invalid-email":
+        return "That email address is not valid.";
+      case "auth/user-disabled":
+        return "This account has been disabled.";
+      case "auth/user-not-found":
+        return "No account found for that email.";
+      case "auth/wrong-password":
+      case "auth/invalid-credential":
+        return "Incorrect email or password.";
+      case "auth/email-already-in-use":
+        return "That email is already registered. Try signing in instead.";
+      case "auth/weak-password":
+        return "Password is too weak. Use at least 6 characters.";
+      case "auth/network-request-failed":
+        return "Network error. Check your connection and try again.";
+      case "auth/too-many-requests":
+        return "Too many attempts. Try again later.";
+      default:
+        return code ? `Authentication error (${code}).` : "Authentication failed.";
+    }
   };
 
   const handleEmailAuth = async () => {
+    setStatus("");
+    if (!navigator.onLine) {
+      setStatus("Email sign-in requires an internet connection.");
+      return;
+    }
+    if (!firebaseEmailReady()) {
+      setStatus("Email sign-in is not configured (missing NEXT_PUBLIC_FIREBASE_* env vars).");
+      return;
+    }
+
     const normalizedEmail = emailInput.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setStatus("Enter a valid email address.");
@@ -154,90 +193,73 @@ export default function SignInPage() {
       setStatus("Enter your password.");
       return;
     }
-    if (emailPassword.length < 4) {
-      setStatus("Password must be at least 4 characters.");
+    if (emailPassword.length < 6) {
+      setStatus("Password must be at least 6 characters (Firebase requirement).");
       return;
     }
 
-    const digest = await emailPasswordDigest(normalizedEmail, emailPassword);
-    const store = loadStore();
-    const existingUser = store.users.find((u) => (u.email ?? "").toLowerCase() === normalizedEmail);
-
-    if (existingUser) {
-      if (existingUser.emailPasswordDigest) {
-        if (existingUser.emailPasswordDigest !== digest) {
-          setStatus("Incorrect password.");
-          return;
-        }
-      } else {
-        const updated = { ...existingUser, emailPasswordDigest: digest };
-        completeAuth(updated, false);
+    try {
+      const methods = await fetchSignInMethodsForEmail(firebaseAuth, normalizedEmail);
+      if (methods.length > 0 && !methods.includes("password")) {
+        setStatus("This email is registered with a different sign-in provider. Use that method or a different email.");
         return;
       }
-      completeAuth(existingUser, false);
-      return;
-    }
 
-    const newUser = {
-      id: createId("user"),
-      walletAddress: walletId(),
-      username: randomUsername(),
-      seedPhrase: generateMnemonic(),
-      email: normalizedEmail,
-      emailPasswordDigest: digest,
-      createdAt: new Date().toISOString(),
-      joinDate: new Date().toISOString(),
-    };
-    completeAuth(newUser, true);
+      let cred;
+      let createdAccount = false;
+      if (methods.includes("password")) {
+        cred = await signInWithEmailAndPassword(firebaseAuth, normalizedEmail, emailPassword);
+      } else {
+        try {
+          cred = await createUserWithEmailAndPassword(firebaseAuth, normalizedEmail, emailPassword);
+          createdAccount = true;
+        } catch (createErr: unknown) {
+          const c = createErr as { code?: string };
+          if (c.code === "auth/email-already-in-use") {
+            cred = await signInWithEmailAndPassword(firebaseAuth, normalizedEmail, emailPassword);
+          } else {
+            throw createErr;
+          }
+        }
+      }
+
+      const uid = cred.user.uid;
+      const profile = await resolveFirebaseEmailProfile(uid, cred.user.email);
+      await persistFirebaseEmailProfile(profile);
+      completeAuth(profile, createdAccount);
+    } catch (e: unknown) {
+      const err = e as { code?: string };
+      setStatus(firebaseAuthErrorMessage(err.code));
+    }
   };
 
   const clearEmailForgotFields = () => {
     setEmailForgot(false);
-    setForgotSeed("");
-    setForgotNewPassword("");
-    setForgotConfirmPassword("");
   };
 
-  const handleEmailForgotReset = async () => {
+  const handleEmailForgotSend = async () => {
     setStatus("");
+    if (!navigator.onLine) {
+      setStatus("Password reset requires an internet connection.");
+      return;
+    }
+    if (!firebaseEmailReady()) {
+      setStatus("Email recovery is not configured (missing NEXT_PUBLIC_FIREBASE_* env vars).");
+      return;
+    }
     const normalizedEmail = emailInput.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setStatus("Enter a valid email address.");
       return;
     }
-    const normalizedSeed = normalizeSeedPhrase(forgotSeed);
-    if (!normalizedSeed) {
-      setStatus("Enter your 12-word seed phrase.");
-      return;
+    try {
+      await sendPasswordResetEmail(firebaseAuth, normalizedEmail);
+      setStatus("If an account exists for that email, Firebase sent a reset link. Check your inbox.");
+      clearEmailForgotFields();
+    } catch (e: unknown) {
+      const err = e as { code?: string };
+      setStatus(firebaseAuthErrorMessage(err.code));
     }
-    if (!forgotNewPassword.trim()) {
-      setStatus("Enter a new password.");
-      return;
-    }
-    if (forgotNewPassword.length < 4) {
-      setStatus("New password must be at least 4 characters.");
-      return;
-    }
-    if (forgotNewPassword !== forgotConfirmPassword) {
-      setStatus("New passwords do not match.");
-      return;
-    }
-
-    const store = loadStore();
-    const user = store.users.find((u) => (u.email ?? "").toLowerCase() === normalizedEmail);
-    if (!user) {
-      setStatus("No account found for that email.");
-      return;
-    }
-    if (normalizeSeedPhrase(user.seedPhrase) !== normalizedSeed) {
-      setStatus("Seed phrase does not match this account.");
-      return;
-    }
-
-    const digest = await emailPasswordDigest(normalizedEmail, forgotNewPassword);
-    const updated = { ...user, emailPasswordDigest: digest };
-    clearEmailForgotFields();
-    completeAuth(updated, false);
   };
 
   return (
@@ -318,7 +340,8 @@ export default function SignInPage() {
           {!emailForgot ? (
             <>
               <p className="text-center text-sm text-slate-300">
-                Enter your email and password. Existing account signs in; new email creates an account.
+                Email sign-in uses Firebase and requires an internet connection. Same form signs in existing accounts or creates a
+                new one.
               </p>
               <input
                 id="emailAuth"
@@ -356,8 +379,8 @@ export default function SignInPage() {
           ) : (
             <>
               <p className="text-center text-sm text-slate-300">
-                Reset your email password using the same email and your 12-word seed from when you created the account. We do not
-                send email—your seed proves you own the wallet.
+                Enter the email for your account. Firebase will send a password reset link if that address is registered. Requires
+                internet.
               </p>
               <input
                 id="emailForgotEmail"
@@ -368,39 +391,11 @@ export default function SignInPage() {
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
               />
-              <textarea
-                id="emailForgotSeed"
-                name="emailForgotSeed"
-                className="h-24 w-full rounded bg-slate-800 p-3 text-sm"
-                placeholder="12-word seed phrase"
-                value={forgotSeed}
-                onChange={(e) => setForgotSeed(e.target.value)}
-              />
-              <input
-                id="emailForgotNew"
-                name="emailForgotNew"
-                type="password"
-                autoComplete="new-password"
-                className="w-full rounded bg-slate-800 p-3 text-sm"
-                placeholder="New password"
-                value={forgotNewPassword}
-                onChange={(e) => setForgotNewPassword(e.target.value)}
-              />
-              <input
-                id="emailForgotConfirm"
-                name="emailForgotConfirm"
-                type="password"
-                autoComplete="new-password"
-                className="w-full rounded bg-slate-800 p-3 text-sm"
-                placeholder="Confirm new password"
-                value={forgotConfirmPassword}
-                onChange={(e) => setForgotConfirmPassword(e.target.value)}
-              />
               <button
                 className="w-full rounded bg-cyan-500 px-4 py-2 font-semibold text-slate-950"
-                onClick={() => void handleEmailForgotReset()}
+                onClick={() => void handleEmailForgotSend()}
               >
-                Reset password &amp; sign in
+                Send reset email
               </button>
               <button
                 type="button"

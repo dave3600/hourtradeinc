@@ -3,7 +3,9 @@ export type UserProfile = {
   walletAddress: string;
   username: string;
   email?: string;
-  /** SHA-256 hex of `${email}|${password}` for email sign-in (client-side only). */
+  /** Firebase Auth UID when this profile was created or linked via email (online). */
+  firebaseUid?: string;
+  /** Legacy: local-only email password digest. New email accounts use Firebase Auth instead. */
   emailPasswordDigest?: string;
   seedPhrase: string;
   createdAt: string;
