@@ -12,8 +12,14 @@ export default function SignInPage() {
   const [seedInput, setSeedInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
+  const [emailForgot, setEmailForgot] = useState(false);
+  const [forgotSeed, setForgotSeed] = useState("");
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
+
+  const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
   const completeAuth = (user: ReturnType<typeof loadStore>["users"][number], created: boolean) => {
     const store = loadStore();
@@ -108,15 +114,13 @@ export default function SignInPage() {
   };
 
   const handleSeedAuth = () => {
-    const normalizedSeed = seedInput.trim().toLowerCase().replace(/\s+/g, " ");
+    const normalizedSeed = normalizeSeedPhrase(seedInput);
     if (!normalizedSeed) {
       setStatus("Enter your seed phrase.");
       return;
     }
     const store = loadStore();
-    const existingUser = store.users.find(
-      (u) => u.seedPhrase.trim().toLowerCase().replace(/\s+/g, " ") === normalizedSeed,
-    );
+    const existingUser = store.users.find((u) => normalizeSeedPhrase(u.seedPhrase) === normalizedSeed);
     if (existingUser) {
       completeAuth(existingUser, false);
       return;
@@ -187,6 +191,55 @@ export default function SignInPage() {
     completeAuth(newUser, true);
   };
 
+  const clearEmailForgotFields = () => {
+    setEmailForgot(false);
+    setForgotSeed("");
+    setForgotNewPassword("");
+    setForgotConfirmPassword("");
+  };
+
+  const handleEmailForgotReset = async () => {
+    setStatus("");
+    const normalizedEmail = emailInput.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setStatus("Enter a valid email address.");
+      return;
+    }
+    const normalizedSeed = normalizeSeedPhrase(forgotSeed);
+    if (!normalizedSeed) {
+      setStatus("Enter your 12-word seed phrase.");
+      return;
+    }
+    if (!forgotNewPassword.trim()) {
+      setStatus("Enter a new password.");
+      return;
+    }
+    if (forgotNewPassword.length < 4) {
+      setStatus("New password must be at least 4 characters.");
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setStatus("New passwords do not match.");
+      return;
+    }
+
+    const store = loadStore();
+    const user = store.users.find((u) => (u.email ?? "").toLowerCase() === normalizedEmail);
+    if (!user) {
+      setStatus("No account found for that email.");
+      return;
+    }
+    if (normalizeSeedPhrase(user.seedPhrase) !== normalizedSeed) {
+      setStatus("Seed phrase does not match this account.");
+      return;
+    }
+
+    const digest = await emailPasswordDigest(normalizedEmail, forgotNewPassword);
+    const updated = { ...user, emailPasswordDigest: digest };
+    clearEmailForgotFields();
+    completeAuth(updated, false);
+  };
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-950 px-6 text-white">
       <h1 className="text-3xl font-bold">Sign in / Sign up</h1>
@@ -196,6 +249,7 @@ export default function SignInPage() {
           onClick={() => {
             setMode("clip");
             setEmailPassword("");
+            clearEmailForgotFields();
           }}
         >
           Sign in / Sign up (3s Clip)
@@ -205,13 +259,17 @@ export default function SignInPage() {
           onClick={() => {
             setMode("seed");
             setEmailPassword("");
+            clearEmailForgotFields();
           }}
         >
           Sign in / Sign up (Seed Phrase)
         </button>
         <button
           className={`rounded px-3 py-2 ${mode === "email" ? "bg-cyan-500 text-black" : "bg-slate-800 text-white"}`}
-          onClick={() => setMode("email")}
+          onClick={() => {
+            setMode("email");
+            clearEmailForgotFields();
+          }}
         >
           Sign in / Sign up (Email)
         </button>
@@ -257,31 +315,105 @@ export default function SignInPage() {
 
       {mode === "email" && (
         <div className="w-full max-w-md space-y-2">
-          <p className="text-center text-sm text-slate-300">
-            Enter your email and password. Existing account signs in; new email creates an account.
-          </p>
-          <input
-            id="emailAuth"
-            name="emailAuth"
-            type="email"
-            className="w-full rounded bg-slate-800 p-3 text-sm"
-            placeholder="Enter email address"
-            value={emailInput}
-            onChange={(e) => setEmailInput(e.target.value)}
-          />
-          <input
-            id="emailPasswordAuth"
-            name="emailPasswordAuth"
-            type="password"
-            autoComplete="current-password"
-            className="w-full rounded bg-slate-800 p-3 text-sm"
-            placeholder="Enter password"
-            value={emailPassword}
-            onChange={(e) => setEmailPassword(e.target.value)}
-          />
-          <button className="w-full rounded bg-cyan-500 px-4 py-2 font-semibold text-slate-950" onClick={() => void handleEmailAuth()}>
-            Continue with Email
-          </button>
+          {!emailForgot ? (
+            <>
+              <p className="text-center text-sm text-slate-300">
+                Enter your email and password. Existing account signs in; new email creates an account.
+              </p>
+              <input
+                id="emailAuth"
+                name="emailAuth"
+                type="email"
+                className="w-full rounded bg-slate-800 p-3 text-sm"
+                placeholder="Enter email address"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+              />
+              <input
+                id="emailPasswordAuth"
+                name="emailPasswordAuth"
+                type="password"
+                autoComplete="current-password"
+                className="w-full rounded bg-slate-800 p-3 text-sm"
+                placeholder="Enter password"
+                value={emailPassword}
+                onChange={(e) => setEmailPassword(e.target.value)}
+              />
+              <button className="w-full rounded bg-cyan-500 px-4 py-2 font-semibold text-slate-950" onClick={() => void handleEmailAuth()}>
+                Continue with Email
+              </button>
+              <button
+                type="button"
+                className="w-full text-center text-sm text-cyan-400 underline decoration-cyan-400/50 underline-offset-2 hover:text-cyan-300"
+                onClick={() => {
+                  setStatus("");
+                  setEmailForgot(true);
+                }}
+              >
+                Forgot password?
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-center text-sm text-slate-300">
+                Reset your email password using the same email and your 12-word seed from when you created the account. We do not
+                send email—your seed proves you own the wallet.
+              </p>
+              <input
+                id="emailForgotEmail"
+                name="emailForgotEmail"
+                type="email"
+                className="w-full rounded bg-slate-800 p-3 text-sm"
+                placeholder="Account email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+              />
+              <textarea
+                id="emailForgotSeed"
+                name="emailForgotSeed"
+                className="h-24 w-full rounded bg-slate-800 p-3 text-sm"
+                placeholder="12-word seed phrase"
+                value={forgotSeed}
+                onChange={(e) => setForgotSeed(e.target.value)}
+              />
+              <input
+                id="emailForgotNew"
+                name="emailForgotNew"
+                type="password"
+                autoComplete="new-password"
+                className="w-full rounded bg-slate-800 p-3 text-sm"
+                placeholder="New password"
+                value={forgotNewPassword}
+                onChange={(e) => setForgotNewPassword(e.target.value)}
+              />
+              <input
+                id="emailForgotConfirm"
+                name="emailForgotConfirm"
+                type="password"
+                autoComplete="new-password"
+                className="w-full rounded bg-slate-800 p-3 text-sm"
+                placeholder="Confirm new password"
+                value={forgotConfirmPassword}
+                onChange={(e) => setForgotConfirmPassword(e.target.value)}
+              />
+              <button
+                className="w-full rounded bg-cyan-500 px-4 py-2 font-semibold text-slate-950"
+                onClick={() => void handleEmailForgotReset()}
+              >
+                Reset password &amp; sign in
+              </button>
+              <button
+                type="button"
+                className="w-full text-center text-sm text-slate-400 underline decoration-slate-500 underline-offset-2 hover:text-slate-300"
+                onClick={() => {
+                  setStatus("");
+                  clearEmailForgotFields();
+                }}
+              >
+                Back to sign in
+              </button>
+            </>
+          )}
         </div>
       )}
       {status && <p className="text-xs text-slate-300">{status}</p>}
