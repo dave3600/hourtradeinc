@@ -1,13 +1,14 @@
 "use client";
 
 import { splitCoin } from "@/lib/ledger/coin-engine";
-import { loadStore, saveStore } from "@/lib/storage";
+import { saveStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export function CoinLifecyclePanel() {
   const router = useRouter();
-  const [store, setStore] = useState(() => loadStore());
+  const store = useHourtradeStore();
   const [recipientInput, setRecipientInput] = useState("");
   const [hours, setHours] = useState("");
   const [minutes, setMinutes] = useState("");
@@ -120,7 +121,6 @@ export function CoinLifecyclePanel() {
       transfers: [...store.transfers, ...createdTransfers],
     };
     saveStore(nextStore);
-    setStore(nextStore);
     setSelectedCoinIds([]);
     setRecipientInput("");
     setHours("");
@@ -159,7 +159,6 @@ export function CoinLifecyclePanel() {
     }
     const nextStore = { ...store, transfers: nextTransfers, coins: nextCoins };
     saveStore(nextStore);
-    setStore(nextStore);
     void fetch("/api/coins/review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

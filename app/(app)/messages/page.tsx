@@ -1,6 +1,7 @@
 "use client";
 
-import { createId, loadStore, saveStore } from "@/lib/storage";
+import { createId, saveStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
@@ -9,7 +10,7 @@ function MessagesContent() {
   const prefillWallet = params.get("wallet") ?? "";
   const [toWallet, setToWallet] = useState("");
   const [body, setBody] = useState("");
-  const [store, setStore] = useState(() => loadStore());
+  const store = useHourtradeStore();
   const user = store.users.find((u) => u.id === store.currentUserId);
   if (!user) return <main className="p-6">Sign in first.</main>;
 
@@ -27,7 +28,6 @@ function MessagesContent() {
     }],
     };
     saveStore(nextStore);
-    setStore(nextStore);
     setBody("");
   };
 

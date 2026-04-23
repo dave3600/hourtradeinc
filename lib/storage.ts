@@ -11,7 +11,7 @@ import type {
   UserProfile,
 } from "./models";
 
-type Store = {
+export type Store = {
   currentUserId?: string;
   users: UserProfile[];
   jobs: Job[];
@@ -34,15 +34,46 @@ const defaultStore: Store = {
   listings: [],
 };
 
+let cachedRaw: string | null = null;
+let cachedStore: Store = defaultStore;
+
+const storeListeners = new Set<() => void>();
+
+/** Subscribe to localStorage store writes (including cross-device pull). */
+export function subscribeHourtradeStore(listener: () => void) {
+  storeListeners.add(listener);
+  return () => {
+    storeListeners.delete(listener);
+  };
+}
+
+function emitHourtradeStore() {
+  if (typeof window === "undefined") return;
+  storeListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 export function loadStore(): Store {
   if (typeof window === "undefined") return defaultStore;
   const raw = window.localStorage.getItem(KEY);
-  if (!raw) return defaultStore;
-  return JSON.parse(raw) as Store;
+  if (raw === cachedRaw) return cachedStore;
+  cachedRaw = raw;
+  if (!raw) {
+    cachedStore = { ...defaultStore };
+    return cachedStore;
+  }
+  cachedStore = JSON.parse(raw) as Store;
+  return cachedStore;
 }
 
 export function saveStore(next: Store) {
   if (typeof window === "undefined") return;
+  cachedRaw = null;
   try {
     window.localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
@@ -60,6 +91,16 @@ export function saveStore(next: Store) {
       // Ignore final failure; in-memory state may still continue for this session.
     }
   }
+
+  const current = next.currentUserId ? next.users.find((u) => u.id === next.currentUserId) : undefined;
+  const firebaseUid = current?.firebaseUid;
+  if (firebaseUid) {
+    void import("@/lib/firebase/cloud-store").then(({ scheduleCloudPush }) => {
+      scheduleCloudPush(next, firebaseUid);
+    });
+  }
+
+  emitHourtradeStore();
 }
 
 export function randomUsername() {

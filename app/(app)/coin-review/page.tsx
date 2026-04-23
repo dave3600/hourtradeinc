@@ -3,8 +3,8 @@
 import { QRCodeSVG } from "qrcode.react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
-import { loadStore } from "@/lib/storage";
+import { Suspense, useState } from "react";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 
 function formatDuration(ms: number) {
   const totalSec = ms / 1000;
@@ -23,7 +23,7 @@ function CoinReviewContent() {
   const coinId = params.get("coinId") ?? "";
   const jobId = params.get("jobId") ?? "";
   const [flipped, setFlipped] = useState(false);
-  const store = useMemo(() => loadStore(), []);
+  const store = useHourtradeStore();
   const coin = store.coins.find((c) => c.id === coinId);
   const job = store.jobs.find((j) => j.id === jobId) ?? store.jobs.find((j) => j.id === coin?.sourceJobId);
   const mintedUser = store.users.find((u) => u.id === coin?.ownerId);

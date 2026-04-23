@@ -1,8 +1,9 @@
 "use client";
 
-import { loadStore, saveStore } from "@/lib/storage";
+import { saveStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import {
   saveSeedPhraseWithWebAuthn,
   unlockSeedPhraseWithWebAuthn,
@@ -11,13 +12,21 @@ import {
 function ProfileContent() {
   const params = useSearchParams();
   const viewedWallet = params.get("wallet");
-  const [store, setStore] = useState(() => loadStore());
+  const store = useHourtradeStore();
   const user = store.users.find((u) => u.id === store.currentUserId);
   const [username, setUsername] = useState(user?.username ?? "");
   const [skills, setSkills] = useState(user?.skills ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
   const [materials, setMaterials] = useState(user?.materials ?? "");
   const [vaultStatus, setVaultStatus] = useState("");
+
+  useEffect(() => {
+    if (!user) return;
+    setUsername(user.username);
+    setSkills(user.skills ?? "");
+    setBio(user.bio ?? "");
+    setMaterials(user.materials ?? "");
+  }, [user?.id, user?.username, user?.skills, user?.bio, user?.materials]);
 
   if (!user) return <main className="p-6">Sign in first.</main>;
 
@@ -29,7 +38,6 @@ function ProfileContent() {
       ),
     };
     saveStore(nextStore);
-    setStore(nextStore);
   };
 
   return (

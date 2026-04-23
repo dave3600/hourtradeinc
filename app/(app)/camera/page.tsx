@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SideNav } from "@/components/nav/SideNav";
-import { loadStore, saveStore } from "@/lib/storage";
+import { saveStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { dequeueAllEvents, enqueueOfflineEvent } from "@/lib/offline/event-queue";
 import { makeIdempotencyKey } from "@/lib/security/webauthn-vault";
 import { useRouter } from "next/navigation";
@@ -11,7 +12,7 @@ export default function CameraPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
-  const [store, setStore] = useState(() => loadStore());
+  const store = useHourtradeStore();
   const [flip, setFlip] = useState(false);
   const [now, setNow] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
@@ -122,7 +123,6 @@ export default function CameraPage() {
         ),
       };
       saveStore(nextStore);
-      setStore(nextStore);
     });
   }, [isOnline, store]);
   const elapsed = activeJob ? now - activeJob.startedAt : 0;
@@ -167,7 +167,6 @@ export default function CameraPage() {
       ],
     };
     saveStore(nextStore);
-    setStore(nextStore);
   };
 
   const capture = async () => {
@@ -231,7 +230,6 @@ export default function CameraPage() {
     );
     const nextStore = { ...store, photos: nextPhotos, jobs: nextJobs };
     saveStore(nextStore);
-    setStore(nextStore);
   };
 
   const clockOut = async () => {
@@ -263,7 +261,6 @@ export default function CameraPage() {
         coins: data.coin ? [...store.coins, data.coin] : store.coins,
       };
       saveStore(nextStore);
-      setStore(nextStore);
       if (data.coin?.id) {
         router.push(`/coin-review?coinId=${encodeURIComponent(data.coin.id)}&jobId=${encodeURIComponent(closedJob.id)}`);
       }
@@ -362,7 +359,6 @@ export default function CameraPage() {
                   photos: store.photos.filter((p) => p.id !== photo.id),
                 };
                 saveStore(nextStore);
-                setStore(nextStore);
               }}
             >
               {photo.storageUrl || photo.dataUrl ? (

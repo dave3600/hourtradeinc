@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo } from "react";
-import { loadStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 
 export default function JobDetailsPage() {
   const params = useParams<{ jobId: string }>();
-  const store = useMemo(() => loadStore(), []);
+  const store = useHourtradeStore();
   const jobId = params?.jobId ?? "";
   const job = store.jobs.find((j) => j.id === jobId);
   const photos = store.photos.filter((p) => p.jobId === jobId);

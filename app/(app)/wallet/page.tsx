@@ -1,7 +1,8 @@
 "use client";
 
 import { CoinLifecyclePanel } from "@/components/coin/CoinLifecyclePanel";
-import { loadStore, saveStore } from "@/lib/storage";
+import { saveStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { QRCodeSVG } from "qrcode.react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,7 +10,7 @@ import { useState } from "react";
 
 export default function WalletPage() {
   const router = useRouter();
-  const [store, setStore] = useState(() => loadStore());
+  const store = useHourtradeStore();
   const [scannedWallet, setScannedWallet] = useState("");
   const user = store.users.find((u) => u.id === store.currentUserId);
   const myCoins = store.coins.filter((c) => c.ownerId === user?.id);
@@ -66,7 +67,6 @@ export default function WalletPage() {
                   );
                   const next = { ...store, coins };
                   saveStore(next);
-                  setStore(next);
                 }}
               >
                 Green Star {(coin.votesWork ?? 0).toLocaleString()}
@@ -80,7 +80,6 @@ export default function WalletPage() {
                   );
                   const next = { ...store, coins };
                   saveStore(next);
-                  setStore(next);
                 }}
               >
                 Red Star {(coin.votesNoWork ?? 0).toLocaleString()}

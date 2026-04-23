@@ -1,10 +1,11 @@
 "use client";
 
-import { createId, loadStore, saveStore } from "@/lib/storage";
+import { createId, saveStore } from "@/lib/storage";
+import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { useState } from "react";
 
 export default function MarketplacePage() {
-  const [store, setStore] = useState(() => loadStore());
+  const store = useHourtradeStore();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priceMs, setPriceMs] = useState(1000);
@@ -26,7 +27,6 @@ export default function MarketplacePage() {
     }],
     };
     saveStore(nextStore);
-    setStore(nextStore);
   };
 
   return (
