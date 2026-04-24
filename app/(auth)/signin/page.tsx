@@ -88,7 +88,7 @@ export default function SignInPage() {
   };
 
   const faceImageFromFrame = (video: HTMLVideoElement) => {
-    const w = 320;
+    const w = 192;
     const h = Math.max(180, Math.floor((video.videoHeight / Math.max(1, video.videoWidth)) * w));
     const canvas = document.createElement("canvas");
     canvas.width = w;
@@ -96,7 +96,7 @@ export default function SignInPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return "";
     ctx.drawImage(video, 0, 0, w, h);
-    return canvas.toDataURL("image/jpeg", 0.8);
+    return canvas.toDataURL("image/jpeg", 0.6);
   };
 
   const voiceHashFromAudioBlob = async (blob: Blob) => {
@@ -377,40 +377,52 @@ export default function SignInPage() {
       faceClip = btoa(`${Date.now()}-${Math.random()}-face`);
     }
 
-    setStatus("Matching face...");
-    const res = await fetch("/api/auth/clip", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ faceClip, faceHash, faceImageDataUrl, users: existing.users }),
-    });
-    const data = await res.json();
+    try {
+      setStatus("Matching face...");
+      const res = await fetch("/api/auth/clip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ faceClip, faceHash, faceImageDataUrl, users: existing.users }),
+      });
+      if (!res.ok) {
+        throw new Error(`Face auth request failed (${res.status})`);
+      }
+      const data = await res.json();
 
-    const store = loadStore();
-    const incomingUser = data.user;
-    if (incomingUser) {
-      await showBlockingPrompt(data?.matched ? "Match" : "No match - account created");
-      const exists = store.users.some((u) => u.id === incomingUser.id);
-      const users = exists
-        ? store.users.map((u) => (u.id === incomingUser.id ? incomingUser : u))
-        : [...store.users, incomingUser];
-      const nextStore = {
-        ...store,
-        users,
-        currentUserId: incomingUser.id,
-      };
-      saveStore(nextStore);
-      setStatus(data?.matched ? "Face matched. Authenticated." : "No match found. New account created and authenticated.");
+      const store = loadStore();
+      const incomingUser = data.user;
+      if (incomingUser) {
+        await showBlockingPrompt(data?.matched ? "Match" : "No match - account created");
+        const withPhoto =
+          faceImageDataUrl && !incomingUser.biometricFacePhotos?.includes(faceImageDataUrl)
+            ? {
+                ...incomingUser,
+                biometricFacePhotos: [...(incomingUser.biometricFacePhotos ?? []), faceImageDataUrl].slice(-8),
+              }
+            : incomingUser;
+        const exists = store.users.some((u) => u.id === withPhoto.id);
+        const users = exists
+          ? store.users.map((u) => (u.id === withPhoto.id ? withPhoto : u))
+          : [...store.users, withPhoto];
+        const nextStore = {
+          ...store,
+          users,
+          currentUserId: withPhoto.id,
+        };
+        saveStore(nextStore);
+        setStatus(data?.matched ? "Face matched. Authenticated." : "No match found. New account created and authenticated.");
+        router.push("/camera");
+        return;
+      }
+      await showBlockingPrompt("No match");
+      setStatus("No face match found.");
+    } catch {
+      setStatus("Camera sign-in failed. Please allow camera access and try again.");
+    } finally {
       setRecording(false);
       setClipCountdown(null);
       setClipPhase("idle");
-      router.push("/camera");
-      return;
     }
-    await showBlockingPrompt("No match");
-    setStatus("No face match found.");
-    setRecording(false);
-    setClipCountdown(null);
-    setClipPhase("idle");
   };
 
   const handleSeedAuth = () => {
