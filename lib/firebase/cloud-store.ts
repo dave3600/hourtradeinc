@@ -8,6 +8,7 @@ import type {
   UserProfile,
 } from "@/lib/models";
 import { firebaseAuth } from "@/lib/firebase/client";
+import { coinHeldByUser } from "@/lib/ledger/coin-ownership";
 import type { Store } from "@/lib/storage";
 
 function deepStripUndefined<T>(value: T): T {
@@ -102,7 +103,7 @@ export function buildUserCloudSlice(store: Store, firebaseUid: string): UserClou
   const jobs = store.jobs.filter((j) => j.userId === userId);
   const jobIds = new Set(jobs.map((j) => j.id));
   const photos = store.photos.filter((p) => p.userId === userId || jobIds.has(p.jobId));
-  const coins = store.coins.filter((c) => c.ownerId === userId);
+  const coins = store.coins.filter((c) => coinHeldByUser(c, me));
   const transfers = store.transfers.filter((t) => t.senderId === userId);
   const messages = store.messages.filter((m) => m.fromWallet === wallet || m.toWallet === wallet);
   const listings = store.listings.filter((l) => l.sellerWallet === wallet);
@@ -148,8 +149,8 @@ export function mergeCloudSliceIntoStore(store: Store, firebaseUid: string, remo
   const otherJobs = store.jobs.filter((j) => j.userId !== userId);
   const mergedUserJobs = mergeById(localJobs, rJobs, preferJob);
 
-  const localCoins = store.coins.filter((c) => c.ownerId === userId);
-  const otherCoins = store.coins.filter((c) => c.ownerId !== userId);
+  const localCoins = store.coins.filter((c) => coinHeldByUser(c, me));
+  const otherCoins = store.coins.filter((c) => !coinHeldByUser(c, me));
   const mergedUserCoins = mergeById(localCoins, rCoins, preferCoin);
 
   const userJobIdSet = new Set<string>([

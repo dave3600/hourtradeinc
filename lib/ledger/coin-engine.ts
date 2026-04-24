@@ -30,14 +30,16 @@ export function splitCoin(
   recipientWallet: string,
   amountMs: number,
   senderId: string,
+  recipientUserId?: string | null,
 ): { parentNext: Coin; child: Coin; transfer: CoinTransfer } {
   if (amountMs <= 0 || amountMs > parent.amountMs) {
     throw new Error("Invalid transfer amount");
   }
+  const recipientOwnerId = recipientUserId?.trim() || recipientWallet.toLowerCase();
   const child: Coin = {
     ...parent,
     id: createId("coin"),
-    ownerId: senderId,
+    ownerId: recipientOwnerId,
     ownerWallet: recipientWallet,
     amountMs,
     parentCoinId: parent.id,

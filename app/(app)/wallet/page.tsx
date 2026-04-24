@@ -1,6 +1,7 @@
 "use client";
 
 import { CoinLifecyclePanel } from "@/components/coin/CoinLifecyclePanel";
+import { coinHeldByUser } from "@/lib/ledger/coin-ownership";
 import { saveStore } from "@/lib/storage";
 import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { QRCodeSVG } from "qrcode.react";
@@ -13,7 +14,7 @@ export default function WalletPage() {
   const store = useHourtradeStore();
   const [scannedWallet, setScannedWallet] = useState("");
   const user = store.users.find((u) => u.id === store.currentUserId);
-  const myCoins = store.coins.filter((c) => c.ownerId === user?.id);
+  const myCoins = store.coins.filter((c) => user && coinHeldByUser(c, user));
   const total = myCoins.reduce((sum, c) => sum + c.amountMs, 0);
 
   if (!user) {

@@ -1,6 +1,9 @@
 "use client";
 
 import { splitCoin } from "@/lib/ledger/coin-engine";
+import { activeCoinsHeldByUser } from "@/lib/ledger/coin-ownership";
+import { resolveRecipient } from "@/lib/recipients/resolve-recipient";
+import { firebaseAuth } from "@/lib/firebase/client";
 import { saveStore } from "@/lib/storage";
 import { useHourtradeStore } from "@/lib/use-hourtrade-store";
 import { useRouter } from "next/navigation";
@@ -17,9 +20,19 @@ export function CoinLifecyclePanel() {
   const [selectedCoinIds, setSelectedCoinIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const user = store.users.find((u) => u.id === store.currentUserId);
-  const myCoins = store.coins.filter((c) => c.ownerId === user?.id && c.status === "active");
-  const pendingTransfers = store.transfers.filter((tx) => tx.status === "pending");
-  const reviewedTransfers = store.transfers.filter((tx) => tx.status !== "pending");
+  const myCoins = user ? activeCoinsHeldByUser(store.coins, user) : [];
+  const pendingTransfers = store.transfers.filter(
+    (tx) =>
+      tx.status === "pending" &&
+      user &&
+      (tx.recipientWallet.toLowerCase() === user.walletAddress.toLowerCase() || tx.senderId === user.id),
+  );
+  const reviewedTransfers = store.transfers.filter(
+    (tx) =>
+      tx.status !== "pending" &&
+      user &&
+      (tx.recipientWallet.toLowerCase() === user.walletAddress.toLowerCase() || tx.senderId === user.id),
+  );
   const selectedCoins = myCoins.filter((coin) => selectedCoinIds.includes(coin.id));
   const selectableCoins = selectedCoins.length > 0 ? selectedCoins : myCoins;
   const selectedTotalMs = selectableCoins.reduce((sum, coin) => sum + coin.amountMs, 0);
@@ -43,34 +56,18 @@ export function CoinLifecyclePanel() {
     return parts.join(" \u2003|\u2003 ");
   };
 
-  const resolveRecipientWallet = (raw: string) => {
-    const normalized = raw.trim();
-    if (!normalized) return null;
-
-    const byUsername = store.users.find(
-      (u) => u.username.toLowerCase() === normalized.toLowerCase(),
-    );
-    if (byUsername) return byUsername.walletAddress;
-
-    const byWallet = store.users.find(
-      (u) => u.walletAddress.toLowerCase() === normalized.toLowerCase(),
-    );
-    if (byWallet) return byWallet.walletAddress;
-
-    if (/^0x[a-fA-F0-9]{6,}$/.test(normalized)) {
-      return normalized;
-    }
-    return null;
-  };
-
-  const send = () => {
+  const send = async () => {
     if (!user) return;
     setError(null);
-    const recipientWallet = resolveRecipientWallet(recipientInput);
-    if (!recipientWallet) {
-      setError("Enter a valid recipient wallet address or username.");
+    const idToken = firebaseAuth.currentUser ? await firebaseAuth.currentUser.getIdToken().catch(() => null) : null;
+    const resolved = await resolveRecipient(recipientInput, store, user.walletAddress, idToken);
+    if (!resolved) {
+      setError(
+        "Enter another user's wallet (0x + 40 hex), username, or email. Unknown addresses must exist in Firebase (email sign-in). You cannot send to yourself.",
+      );
       return;
     }
+    const recipientWallet = resolved.walletAddress;
     if (sendAmountMs <= 0) {
       setError("Enter a send amount greater than zero.");
       return;
@@ -95,6 +92,7 @@ export function CoinLifecyclePanel() {
         recipientWallet,
         amountFromCoin,
         user.id,
+        resolved.userId,
       );
       const sourceIdx = workingCoins.findIndex((c) => c.id === sourceCoin.id);
       if (sourceIdx >= 0) {
@@ -174,7 +172,7 @@ export function CoinLifecyclePanel() {
           id="recipientWallet"
           name="recipientWallet"
           className="w-full rounded bg-slate-800 p-2 text-sm"
-          placeholder="Enter recipient's wallet address or username"
+          placeholder="Recipient: wallet (0x…40 hex), username, or email"
           value={recipientInput}
           onChange={(e) => setRecipientInput(e.target.value)}
         />
@@ -262,7 +260,7 @@ export function CoinLifecyclePanel() {
           )}
         </div>
         {error && <p className="rounded bg-red-500/20 p-2 text-xs text-red-200">{error}</p>}
-        <button className="rounded bg-cyan-500 px-4 py-2 text-black" onClick={send}>
+        <button className="rounded bg-cyan-500 px-4 py-2 text-black" onClick={() => void send()}>
           Send Time
         </button>
       </section>
