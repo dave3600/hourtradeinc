@@ -16,8 +16,11 @@ export function matchClipToUsers(
   users: UserProfile[],
 ): MatchResult {
   const fingerprint = makeClipFingerprint(base64Clip);
-  // Primary match is exact fingerprint equality (when previously stored locally).
-  const match = users.find((u) => (u as UserProfile & { biometricFingerprint?: string }).biometricFingerprint === fingerprint);
+  // Primary match: exact face fingerprint equality (fallback to legacy single fingerprint).
+  const match = users.find((u) => {
+    const user = u as UserProfile & { biometricFaceFingerprint?: string; biometricFingerprint?: string };
+    return user.biometricFaceFingerprint === fingerprint || user.biometricFingerprint === fingerprint;
+  });
   return {
     matchedUser: match,
     confidence: match ? 0.91 : 0.0,

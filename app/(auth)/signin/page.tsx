@@ -24,6 +24,7 @@ export default function SignInPage() {
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
   const [clipCountdown, setClipCountdown] = useState<number | null>(null);
+  const [clipPhase, setClipPhase] = useState<"idle" | "face" | "voice">("idle");
 
   const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -43,32 +44,27 @@ export default function SignInPage() {
     router.push("/camera");
   };
 
-  const handleClipAuth = async () => {
-    if (recording) return;
-    setRecording(true);
-    setStatus("Recording 3-second biometric clip...");
-    const existing = loadStore();
-    let clip = "";
+  const recordClip = async (opts: { video: boolean; audio: boolean; phase: "face" | "voice"; prompt: string }) => {
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: true,
+        video: opts.video ? { facingMode: "user" } : false,
+        audio: opts.audio,
       });
-      if (previewRef.current) {
+      if (opts.video && previewRef.current) {
         previewRef.current.srcObject = stream;
         await previewRef.current.play();
       }
-      const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+      const mimeType = opts.video ? "video/webm" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
       const chunks: BlobPart[] = [];
       await new Promise<void>((resolve) => {
         recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            chunks.push(event.data);
-          }
+          if (event.data.size > 0) chunks.push(event.data);
         };
         recorder.onstop = () => resolve();
-        setStatus('Get ready... Look straight at the camera and clearly say: "hOurTrade prove my work".');
+        setStatus(opts.prompt);
+        setClipPhase(opts.phase);
         setClipCountdown(3);
         const countdownInterval = window.setInterval(() => {
           setClipCountdown((prev) => {
@@ -82,8 +78,8 @@ export default function SignInPage() {
         recorder.start();
         window.setTimeout(() => recorder.stop(), 3000);
       });
-      const blob = new Blob(chunks, { type: "video/webm" });
-      clip = await new Promise<string>((resolve) => {
+      const blob = new Blob(chunks, { type: mimeType });
+      return await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
           const result = (reader.result as string) ?? "";
@@ -91,20 +87,41 @@ export default function SignInPage() {
         };
         reader.readAsDataURL(blob);
       });
-    } catch {
-      clip = btoa(`${Date.now()}-${Math.random()}`);
     } finally {
       stream?.getTracks().forEach((track) => track.stop());
-      if (previewRef.current) {
-        previewRef.current.srcObject = null;
-      }
+      if (previewRef.current) previewRef.current.srcObject = null;
+    }
+  };
+
+  const handleClipAuth = async () => {
+    if (recording) return;
+    setRecording(true);
+    const existing = loadStore();
+    let faceClip = "";
+    let voiceClip = "";
+    try {
+      faceClip = await recordClip({
+        phase: "face",
+        video: true,
+        audio: false,
+        prompt: "Face step: look straight at camera with neutral expression.",
+      });
+      voiceClip = await recordClip({
+        phase: "voice",
+        video: false,
+        audio: true,
+        prompt: 'Voice step: say clearly "hOurTrade prove my work" once.',
+      });
+    } catch {
+      faceClip = btoa(`${Date.now()}-${Math.random()}-face`);
+      voiceClip = btoa(`${Date.now()}-${Math.random()}-voice`);
     }
 
-    setStatus("Matching signature...");
+    setStatus("Matching face and voice...");
     const res = await fetch("/api/auth/clip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clip, users: existing.users }),
+      body: JSON.stringify({ faceClip, voiceClip, users: existing.users }),
     });
     const data = await res.json();
 
@@ -121,15 +138,21 @@ export default function SignInPage() {
         currentUserId: incomingUser.id,
       };
       saveStore(nextStore);
-      setStatus(data.created ? "New biometric account created." : "Biometric match found. Authenticated.");
+      setStatus(data.created ? "New biometric account created." : "Face + voice verified. Authenticated.");
       setRecording(false);
       setClipCountdown(null);
+      setClipPhase("idle");
       router.push("/camera");
       return;
     }
+    if (data?.error === "voice_mismatch") {
+      setStatus("Face matched, but voice password did not match. Please try again.");
+    } else {
+      setStatus("Authentication failed. Try again.");
+    }
     setRecording(false);
     setClipCountdown(null);
-    setStatus("Authentication failed. Try again.");
+    setClipPhase("idle");
   };
 
   const handleSeedAuth = () => {
@@ -314,13 +337,15 @@ export default function SignInPage() {
       {mode === "clip" && (
         <>
           <p className="max-w-md text-center text-sm text-slate-300">
-            Biometric sign-in guide: hold phone at eye level, face centered, steady lighting, and say
-            <span className="font-semibold text-cyan-300"> "hOurTrade prove my work"</span> during the 3-second capture.
+            Biometric sign-in is now 2-step:
+            <span className="font-semibold text-cyan-300"> Face (user ID)</span> then
+            <span className="font-semibold text-cyan-300"> Voice phrase (password)</span>.
           </p>
           <div className="w-full max-w-md rounded border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200">
-            <p>1) Look directly at the camera lens (not the screen).</p>
-            <p>2) Keep your head still and speak the phrase once, clearly.</p>
-            <p>3) Wait for "Matching signature..." before moving.</p>
+            <p>1) Face step: look directly at the camera lens, neutral expression, good lighting.</p>
+            <p>2) Voice step: say exactly <span className="font-semibold text-cyan-300">"hOurTrade prove my work"</span>.</p>
+            <p>3) Wait for match result before tapping again.</p>
+            {clipPhase !== "idle" && <p className="mt-2 text-center text-cyan-300">Current step: {clipPhase.toUpperCase()}</p>}
             {clipCountdown !== null && (
               <p className="mt-2 text-center text-lg font-bold text-cyan-300">Recording in {clipCountdown}</p>
             )}
@@ -336,7 +361,7 @@ export default function SignInPage() {
             onClick={handleClipAuth}
             disabled={recording}
           >
-            {recording ? "Recording..." : "Sign In / Sign Up (3s Clip)"}
+            {recording ? "Capturing biometrics..." : "Sign In / Sign Up (Face + Voice)"}
           </button>
         </>
       )}

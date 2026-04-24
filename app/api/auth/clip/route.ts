@@ -16,14 +16,18 @@ function randomUsername() {
 }
 
 export async function POST(req: Request) {
-  const { clip, users = [] } = await req.json();
-  const fingerprint = makeClipFingerprint(clip);
-  const result = matchClipToUsers(clip, users as UserProfile[]);
+  const { clip, faceClip, voiceClip, users = [] } = await req.json();
+  const faceSource = faceClip || clip || "";
+  const voiceSource = voiceClip || clip || "";
+  const faceFingerprint = makeClipFingerprint(faceSource);
+  const voiceFingerprint = makeClipFingerprint(voiceSource);
+  const result = matchClipToUsers(faceSource, users as UserProfile[]);
 
   let matchedUser = result.matchedUser;
   let created = false;
+  let voiceAccepted = true;
   if (!matchedUser && adminDb) {
-    const signatureSnap = await adminDb.collection("auth_signatures").doc(fingerprint).get();
+    const signatureSnap = await adminDb.collection("auth_signatures").doc(faceFingerprint).get();
     const signatureUserId = signatureSnap.exists ? (signatureSnap.data()?.userId as string | undefined) : undefined;
     if (signatureUserId) {
       const serverUser = await adminDb.collection("users").doc(signatureUserId).get();
@@ -39,24 +43,46 @@ export async function POST(req: Request) {
       walletAddress: Wallet.createRandom().address,
       username: randomUsername(),
       seedPhrase: generateMnemonic(),
-      biometricFingerprint: fingerprint,
+      biometricFingerprint: faceFingerprint,
+      biometricFaceFingerprint: faceFingerprint,
+      biometricVoiceFingerprint: voiceFingerprint,
       createdAt: new Date().toISOString(),
       joinDate: new Date().toISOString(),
     };
     created = true;
   } else {
+    const previousVoice = matchedUser.biometricVoiceFingerprint;
+    if (previousVoice && previousVoice !== voiceFingerprint) {
+      voiceAccepted = false;
+    }
     matchedUser = {
       ...matchedUser,
-      biometricFingerprint: fingerprint,
+      biometricFingerprint: faceFingerprint,
+      biometricFaceFingerprint: faceFingerprint,
+      biometricVoiceFingerprint: voiceAccepted ? voiceFingerprint : matchedUser.biometricVoiceFingerprint,
     };
+  }
+
+  if (!voiceAccepted) {
+    return NextResponse.json(
+      {
+        matchedUserId: matchedUser.id,
+        user: null,
+        created: false,
+        confidence: result.confidence,
+        fingerprint: faceFingerprint,
+        error: "voice_mismatch",
+      },
+      { status: 401 },
+    );
   }
 
   if (adminDb) {
     await adminDb.collection("users").doc(matchedUser.id).set(matchedUser, { merge: true });
-    await adminDb.collection("auth_signatures").doc(fingerprint).set(
+    await adminDb.collection("auth_signatures").doc(faceFingerprint).set(
       {
         userId: matchedUser.id,
-        fingerprint,
+        fingerprint: faceFingerprint,
         confidence: result.confidence,
         updatedAt: Date.now(),
       },
@@ -69,6 +95,6 @@ export async function POST(req: Request) {
     user: matchedUser,
     created,
     confidence: result.confidence,
-    fingerprint,
+    fingerprint: faceFingerprint,
   });
 }
