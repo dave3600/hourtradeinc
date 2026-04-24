@@ -6,6 +6,10 @@ type Body = {
   userId?: string;
   faceHash?: string;
   voiceHash?: string;
+  faceDetected?: boolean;
+  voiceDetected?: boolean;
+  faceBox?: { x: number; y: number; width: number; height: number } | null;
+  voiceModulation?: number;
   users?: UserProfile[];
 };
 
@@ -43,7 +47,16 @@ function uniqueRecent(values: string[], max = 5): string[] {
 }
 
 export async function POST(req: Request) {
-  const { userId, faceHash = "", voiceHash = "", users = [] } = (await req.json()) as Body;
+  const {
+    userId,
+    faceHash = "",
+    voiceHash = "",
+    faceDetected = false,
+    voiceDetected = false,
+    faceBox = null,
+    voiceModulation = 0,
+    users = [],
+  } = (await req.json()) as Body;
   if (!userId) {
     return NextResponse.json({ error: "missing_user_id" }, { status: 400 });
   }
@@ -80,12 +93,12 @@ export async function POST(req: Request) {
   ]);
 
   // User-scoped matching only.
-  const faceMatch = matchesAny(faceHash, knownFace, 56);
-  const voiceMatch = matchesAny(voiceHash, knownVoice, 24);
+  const faceMatch = faceDetected ? matchesAny(faceHash, knownFace, 56) : false;
+  const voiceMatch = voiceDetected ? matchesAny(voiceHash, knownVoice, 24) : false;
 
   // Save latest samples to this account regardless of match result.
-  const nextFace = uniqueRecent([...knownFace, faceHash]);
-  const nextVoice = uniqueRecent([...knownVoice, voiceHash]);
+  const nextFace = faceDetected ? uniqueRecent([...knownFace, faceHash]) : knownFace;
+  const nextVoice = voiceDetected ? uniqueRecent([...knownVoice, voiceHash]) : knownVoice;
 
   let possibleDuplicateUsername: string | null = null;
   let possibleDuplicateUserId: string | null = null;
@@ -96,7 +109,7 @@ export async function POST(req: Request) {
       other.biometricFaceFingerprint ?? "",
       other.biometricFingerprint ?? "",
     ]);
-    if (matchesAny(faceHash, otherFace, 44)) {
+    if (faceDetected && matchesAny(faceHash, otherFace, 44)) {
       possibleDuplicateUsername = other.username;
       possibleDuplicateUserId = other.id;
       break;
@@ -105,10 +118,12 @@ export async function POST(req: Request) {
 
   const updatedUser: UserProfile = {
     ...currentUser,
-    biometricFaceFingerprint: faceHash || currentUser.biometricFaceFingerprint,
-    biometricVoiceFingerprint: voiceHash || currentUser.biometricVoiceFingerprint,
+    biometricFaceFingerprint: faceDetected ? faceHash : currentUser.biometricFaceFingerprint,
+    biometricVoiceFingerprint: voiceDetected ? voiceHash : currentUser.biometricVoiceFingerprint,
     biometricFaceHashes: nextFace,
     biometricVoiceHashes: nextVoice,
+    biometricLastFaceBox: faceBox ?? currentUser.biometricLastFaceBox,
+    biometricLastVoiceModulation: voiceDetected ? voiceModulation : currentUser.biometricLastVoiceModulation,
   };
 
   if (adminDb) {
@@ -117,6 +132,8 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
+    faceDetected,
+    voiceDetected,
     faceMatch,
     voiceMatch,
     possibleDuplicateUsername,

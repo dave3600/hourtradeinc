@@ -15,6 +15,10 @@ export type UserProfile = {
   biometricVoiceFingerprint?: string;
   /** Recent voice hashes for tolerance-based matching on this account. */
   biometricVoiceHashes?: string[];
+  /** Last detected face bounding box used by biometric check. */
+  biometricLastFaceBox?: { x: number; y: number; width: number; height: number };
+  /** Last measured voice modulation score (higher means more speech dynamics). */
+  biometricLastVoiceModulation?: number;
   /** Manual password digest used with face-id sign-in mode. */
   biometricPasswordDigest?: string;
   /** Legacy: local-only email password digest. New email accounts use Firebase Auth instead. */

@@ -26,8 +26,23 @@ export default function SignInPage() {
   const [clipCountdown, setClipCountdown] = useState<number | null>(null);
   const [clipPhase, setClipPhase] = useState<"idle" | "face">("idle");
   const [emailBiometricStep, setEmailBiometricStep] = useState<"idle" | "face" | "voice">("idle");
+  const [promptMessage, setPromptMessage] = useState<string | null>(null);
+  const promptResolverRef = useRef<(() => void) | null>(null);
 
   const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+  const showBlockingPrompt = (message: string) =>
+    new Promise<void>((resolve) => {
+      setPromptMessage(message);
+      promptResolverRef.current = resolve;
+    });
+
+  const acknowledgePrompt = () => {
+    const resolve = promptResolverRef.current;
+    promptResolverRef.current = null;
+    setPromptMessage(null);
+    resolve?.();
+  };
 
   const completeAuth = (user: ReturnType<typeof loadStore>["users"][number], created: boolean) => {
     const store = loadStore();
@@ -104,6 +119,84 @@ export default function SignInPage() {
     }
   };
 
+  const detectFaceBox = async (video: HTMLVideoElement): Promise<{ x: number; y: number; width: number; height: number } | null> => {
+    try {
+      if ("FaceDetector" in window) {
+        const Detector = (window as unknown as { FaceDetector?: new () => { detect(input: CanvasImageSource): Promise<any[]> } }).FaceDetector;
+        if (Detector) {
+          const detector = new Detector();
+          const faces = await detector.detect(video);
+          if (faces.length) {
+            const b = faces[0]?.boundingBox;
+            if (b) return { x: b.x, y: b.y, width: b.width, height: b.height };
+          }
+        }
+      }
+
+      // Fallback heuristic for browsers without FaceDetector:
+      // use center-frame luminance/contrast activity to infer likely face presence.
+      const w = 64;
+      const h = 64;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      const lum: number[] = [];
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i] ?? 0;
+        const g = data[i + 1] ?? 0;
+        const b = data[i + 2] ?? 0;
+        lum.push(0.299 * r + 0.587 * g + 0.114 * b);
+      }
+      const mean = lum.reduce((a, b) => a + b, 0) / lum.length;
+      const variance = lum.reduce((acc, v) => acc + (v - mean) ** 2, 0) / lum.length;
+      const std = Math.sqrt(variance);
+
+      // very dark/flat frames are treated as no-face.
+      if (mean < 25 || std < 12) return null;
+
+      // Center crop as approximate face box when heuristic passes.
+      return {
+        x: w * 0.25,
+        y: h * 0.18,
+        width: w * 0.5,
+        height: h * 0.64,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const voiceModulationFromAudioBlob = async (blob: Blob) => {
+    try {
+      const arr = await blob.arrayBuffer();
+      const ctx = new AudioContext();
+      const decoded = await ctx.decodeAudioData(arr.slice(0));
+      const pcm = decoded.getChannelData(0);
+      const bins = 80;
+      const step = Math.max(1, Math.floor(pcm.length / bins));
+      const energies: number[] = [];
+      for (let i = 0; i < bins; i += 1) {
+        let sum = 0;
+        for (let j = 0; j < step; j += 1) {
+          const idx = i * step + j;
+          if (idx >= pcm.length) break;
+          sum += Math.abs(pcm[idx] ?? 0);
+        }
+        energies.push(sum / step);
+      }
+      const mean = energies.reduce((a, b) => a + b, 0) / energies.length;
+      const variance = energies.reduce((acc, e) => acc + (e - mean) ** 2, 0) / energies.length;
+      void ctx.close();
+      return Math.sqrt(variance);
+    } catch {
+      return 0;
+    }
+  };
+
   const runEmailBiometricCheck = async (userId: string) => {
     let stream: MediaStream | null = null;
     try {
@@ -120,6 +213,8 @@ export default function SignInPage() {
       setStatus("Face check: look at camera.");
       await new Promise((resolve) => window.setTimeout(resolve, 1200));
       const faceHash = previewRef.current ? hammingHexFromFrame(previewRef.current) : "";
+      const faceBox = previewRef.current ? await detectFaceBox(previewRef.current) : null;
+      const faceDetected = Boolean(faceBox && faceBox.width > 20 && faceBox.height > 20);
 
       setEmailBiometricStep("voice");
       setStatus('Voice check: say "open sesame".');
@@ -135,16 +230,27 @@ export default function SignInPage() {
       });
       const voiceBlob = new Blob(chunks, { type: "audio/webm" });
       const voiceHash = await voiceHashFromAudioBlob(voiceBlob);
+      const voiceModulation = await voiceModulationFromAudioBlob(voiceBlob);
+      const voiceDetected = voiceModulation > 0.008;
 
       const store = loadStore();
       const res = await fetch("/api/auth/biometric-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, faceHash, voiceHash, users: store.users }),
+        body: JSON.stringify({
+          userId,
+          faceHash,
+          voiceHash,
+          faceDetected,
+          voiceDetected,
+          faceBox,
+          voiceModulation,
+          users: store.users,
+        }),
       });
       const data = await res.json();
-      window.alert(data.faceMatch ? "Face match" : "Face no match");
-      window.alert(data.voiceMatch ? "Voice match" : "Voice no match");
+      await showBlockingPrompt(data.faceDetected ? (data.faceMatch ? "Face match" : "Face no match") : "No face detected");
+      await showBlockingPrompt(data.voiceDetected ? (data.voiceMatch ? "Voice match" : "Voice no match") : "No voice detected");
       if (data.possibleDuplicateUsername) {
         setStatus(`u look like ${data.possibleDuplicateUsername}`);
       }
@@ -265,7 +371,7 @@ export default function SignInPage() {
     const store = loadStore();
     const incomingUser = data.user;
     if (incomingUser) {
-      window.alert(data?.matched ? "Match" : "No match - account created");
+      await showBlockingPrompt(data?.matched ? "Match" : "No match - account created");
       const exists = store.users.some((u) => u.id === incomingUser.id);
       const users = exists
         ? store.users.map((u) => (u.id === incomingUser.id ? incomingUser : u))
@@ -283,7 +389,7 @@ export default function SignInPage() {
       router.push("/camera");
       return;
     }
-    window.alert("No match");
+    await showBlockingPrompt("No match");
     setStatus("No face match found.");
     setRecording(false);
     setClipCountdown(null);
@@ -607,6 +713,20 @@ export default function SignInPage() {
         </div>
       )}
       {status && <p className="text-xs text-slate-300">{status}</p>}
+      {promptMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-4 text-white shadow-xl">
+            <p className="text-sm">{promptMessage}</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded bg-cyan-500 px-4 py-2 font-semibold text-slate-950"
+              onClick={acknowledgePrompt}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
