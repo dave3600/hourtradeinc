@@ -44,6 +44,7 @@ function ProfileContent() {
     <main className="min-h-screen space-y-3 bg-slate-950 p-4 text-white">
       <h1 className="text-2xl font-bold">Profile</h1>
       {viewedWallet && <p className="text-xs text-cyan-300">Viewing wallet: {viewedWallet}</p>}
+      <p className="text-xs text-slate-300">Email: {user.email ?? "not set"}</p>
       <p className="text-xs text-slate-300">Seed phrase: {user.seedPhrase}</p>
       <input id="profileUsername" name="profileUsername" className="w-full rounded bg-slate-800 p-2" value={username} onChange={(e)=>setUsername(e.target.value)} placeholder="Username" />
       <textarea id="profileSkills" name="profileSkills" className="w-full rounded bg-slate-800 p-2" value={skills} onChange={(e)=>setSkills(e.target.value)} placeholder="Skills" />
