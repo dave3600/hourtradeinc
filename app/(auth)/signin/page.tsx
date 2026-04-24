@@ -87,6 +87,18 @@ export default function SignInPage() {
     return hex;
   };
 
+  const faceImageFromFrame = (video: HTMLVideoElement) => {
+    const w = 320;
+    const h = Math.max(180, Math.floor((video.videoHeight / Math.max(1, video.videoWidth)) * w));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(video, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.8);
+  };
+
   const voiceHashFromAudioBlob = async (blob: Blob) => {
     try {
       const arr = await blob.arrayBuffer();
@@ -213,6 +225,7 @@ export default function SignInPage() {
       setStatus("Face check: look at camera.");
       await new Promise((resolve) => window.setTimeout(resolve, 1200));
       const faceHash = previewRef.current ? hammingHexFromFrame(previewRef.current) : "";
+      const faceImageDataUrl = previewRef.current ? faceImageFromFrame(previewRef.current) : "";
       const faceBox = previewRef.current ? await detectFaceBox(previewRef.current) : null;
       const faceDetected = Boolean(faceBox && faceBox.width > 20 && faceBox.height > 20);
 
@@ -240,6 +253,7 @@ export default function SignInPage() {
         body: JSON.stringify({
           userId,
           faceHash,
+          faceImageDataUrl,
           voiceHash,
           faceDetected,
           voiceDetected,
@@ -305,6 +319,7 @@ export default function SignInPage() {
         await previewRef.current.play();
       }
       const sampleHash = previewRef.current ? computeFaceHash(previewRef.current) : "";
+      const sampleImage = previewRef.current ? faceImageFromFrame(previewRef.current) : "";
       const mimeType = "video/webm";
       const recorder = new MediaRecorder(stream, { mimeType });
       const chunks: BlobPart[] = [];
@@ -337,7 +352,7 @@ export default function SignInPage() {
         };
         reader.readAsDataURL(blob);
       });
-      return { clip, faceHash: sampleHash };
+      return { clip, faceHash: sampleHash, faceImageDataUrl: sampleImage };
     } finally {
       stream?.getTracks().forEach((track) => track.stop());
       if (previewRef.current) previewRef.current.srcObject = null;
@@ -350,12 +365,14 @@ export default function SignInPage() {
     const existing = loadStore();
     let faceClip = "";
     let faceHash = "";
+    let faceImageDataUrl = "";
     try {
       const recorded = await recordClip({
         prompt: "Face step: look straight at camera with neutral expression.",
       });
       faceClip = recorded.clip;
       faceHash = recorded.faceHash;
+      faceImageDataUrl = recorded.faceImageDataUrl;
     } catch {
       faceClip = btoa(`${Date.now()}-${Math.random()}-face`);
     }
@@ -364,7 +381,7 @@ export default function SignInPage() {
     const res = await fetch("/api/auth/clip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ faceClip, faceHash, users: existing.users }),
+      body: JSON.stringify({ faceClip, faceHash, faceImageDataUrl, users: existing.users }),
     });
     const data = await res.json();
 

@@ -49,6 +49,9 @@ export function SideNav({ open, onClose }: Props) {
           <Link className="block rounded bg-slate-800 p-2" href="/profile">
             Profile
           </Link>
+          <Link className="block rounded bg-slate-800 p-2" href="/photo-id">
+            Photo ID
+          </Link>
           <button
             className="block w-full rounded bg-red-600 p-2 text-left"
             onClick={logout}

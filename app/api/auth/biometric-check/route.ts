@@ -6,6 +6,7 @@ type Body = {
   userId?: string;
   faceHash?: string;
   voiceHash?: string;
+  faceImageDataUrl?: string;
   faceDetected?: boolean;
   voiceDetected?: boolean;
   faceBox?: { x: number; y: number; width: number; height: number } | null;
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
     userId,
     faceHash = "",
     voiceHash = "",
+    faceImageDataUrl = "",
     faceDetected = false,
     voiceDetected = false,
     faceBox = null,
@@ -122,6 +124,9 @@ export async function POST(req: Request) {
     biometricVoiceFingerprint: voiceDetected ? voiceHash : currentUser.biometricVoiceFingerprint,
     biometricFaceHashes: nextFace,
     biometricVoiceHashes: nextVoice,
+    biometricFacePhotos: faceDetected
+      ? uniqueRecent([...(currentUser.biometricFacePhotos ?? []), faceImageDataUrl], 8)
+      : (currentUser.biometricFacePhotos ?? []),
     biometricLastFaceBox: faceBox ?? currentUser.biometricLastFaceBox,
     biometricLastVoiceModulation: voiceDetected ? voiceModulation : currentUser.biometricLastVoiceModulation,
   };

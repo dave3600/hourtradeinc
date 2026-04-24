@@ -16,7 +16,7 @@ function randomUsername() {
 }
 
 export async function POST(req: Request) {
-  const { clip, faceClip, faceHash, users = [] } = await req.json();
+  const { clip, faceClip, faceHash, faceImageDataUrl = "", users = [] } = await req.json();
   const faceSource = faceClip || clip || "";
   const normalizedFaceHash = typeof faceHash === "string" && faceHash.trim() ? faceHash.trim().toLowerCase() : "";
   const fallbackHash = makeClipFingerprint(faceSource);
@@ -56,6 +56,10 @@ export async function POST(req: Request) {
     ...matchedUser,
     biometricFingerprint: faceFingerprint,
     biometricFaceFingerprint: faceFingerprint,
+    biometricFacePhotos: [
+      ...((matchedUser.biometricFacePhotos ?? []).slice(-4)),
+      typeof faceImageDataUrl === "string" ? faceImageDataUrl : "",
+    ].filter(Boolean),
   };
 
   if (adminDb) {

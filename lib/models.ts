@@ -11,6 +11,8 @@ export type UserProfile = {
   biometricFaceFingerprint?: string;
   /** Recent face hashes for tolerance-based matching on this account. */
   biometricFaceHashes?: string[];
+  /** Recent face photos captured during sign-in checks. */
+  biometricFacePhotos?: string[];
   /** Voice fingerprint used as biometric password (second factor). */
   biometricVoiceFingerprint?: string;
   /** Recent voice hashes for tolerance-based matching on this account. */
