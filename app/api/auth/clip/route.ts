@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateMnemonic } from "bip39";
 import { Wallet } from "ethers";
-import { makeClipFingerprint, matchClipToUsers } from "@/lib/biometric/match-service";
+import { makeClipFingerprint, matchClipToUsers, matchFaceHashToUsers } from "@/lib/biometric/match-service";
 import { adminDb } from "@/lib/firebase/admin";
 import type { UserProfile } from "@/lib/models";
 
@@ -16,10 +16,14 @@ function randomUsername() {
 }
 
 export async function POST(req: Request) {
-  const { clip, faceClip, users = [] } = await req.json();
+  const { clip, faceClip, faceHash, users = [] } = await req.json();
   const faceSource = faceClip || clip || "";
-  const faceFingerprint = makeClipFingerprint(faceSource);
-  const result = matchClipToUsers(faceSource, users as UserProfile[]);
+  const normalizedFaceHash = typeof faceHash === "string" && faceHash.trim() ? faceHash.trim().toLowerCase() : "";
+  const fallbackHash = makeClipFingerprint(faceSource);
+  const faceFingerprint = normalizedFaceHash || fallbackHash;
+  const result = normalizedFaceHash
+    ? matchFaceHashToUsers(faceFingerprint, users as UserProfile[])
+    : matchClipToUsers(faceSource, users as UserProfile[]);
 
   let matchedUser = result.matchedUser;
   let created = false;

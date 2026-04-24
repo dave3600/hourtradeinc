@@ -25,6 +25,7 @@ export default function SignInPage() {
   const [recording, setRecording] = useState(false);
   const [clipCountdown, setClipCountdown] = useState<number | null>(null);
   const [clipPhase, setClipPhase] = useState<"idle" | "face">("idle");
+  const [emailBiometricStep, setEmailBiometricStep] = useState<"idle" | "face" | "voice">("idle");
 
   const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -44,6 +45,148 @@ export default function SignInPage() {
     router.push("/camera");
   };
 
+  const hammingHexFromFrame = (video: HTMLVideoElement) => {
+    const w = 16;
+    const h = 16;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(video, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h).data;
+    const gray: number[] = [];
+    for (let i = 0; i < img.length; i += 4) {
+      const r = img[i] ?? 0;
+      const g = img[i + 1] ?? 0;
+      const b = img[i + 2] ?? 0;
+      gray.push(Math.round(r * 0.299 + g * 0.587 + b * 0.114));
+    }
+    const avg = gray.reduce((sum, v) => sum + v, 0) / gray.length;
+    let bits = "";
+    for (const v of gray) bits += v >= avg ? "1" : "0";
+    let hex = "";
+    for (let i = 0; i < bits.length; i += 4) {
+      hex += Number.parseInt(bits.slice(i, i + 4), 2).toString(16);
+    }
+    return hex;
+  };
+
+  const voiceHashFromAudioBlob = async (blob: Blob) => {
+    try {
+      const arr = await blob.arrayBuffer();
+      const ctx = new AudioContext();
+      const decoded = await ctx.decodeAudioData(arr.slice(0));
+      const pcm = decoded.getChannelData(0);
+      const bins = 64;
+      const step = Math.max(1, Math.floor(pcm.length / bins));
+      const energies: number[] = [];
+      for (let i = 0; i < bins; i += 1) {
+        let sum = 0;
+        for (let j = 0; j < step; j += 1) {
+          const idx = i * step + j;
+          if (idx >= pcm.length) break;
+          sum += Math.abs(pcm[idx] ?? 0);
+        }
+        energies.push(sum / step);
+      }
+      const mean = energies.reduce((a, b) => a + b, 0) / energies.length;
+      let bits = "";
+      for (const e of energies) bits += e >= mean ? "1" : "0";
+      let hex = "";
+      for (let i = 0; i < bits.length; i += 4) {
+        hex += Number.parseInt(bits.slice(i, i + 4), 2).toString(16);
+      }
+      void ctx.close();
+      return hex;
+    } catch {
+      return "";
+    }
+  };
+
+  const runEmailBiometricCheck = async (userId: string) => {
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: true,
+      });
+      if (previewRef.current) {
+        previewRef.current.srcObject = stream;
+        await previewRef.current.play();
+      }
+
+      setEmailBiometricStep("face");
+      setStatus("Face check: look at camera.");
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      const faceHash = previewRef.current ? hammingHexFromFrame(previewRef.current) : "";
+
+      setEmailBiometricStep("voice");
+      setStatus('Voice check: say "open sesame".');
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const chunks: BlobPart[] = [];
+      await new Promise<void>((resolve) => {
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onstop = () => resolve();
+        recorder.start();
+        window.setTimeout(() => recorder.stop(), 2500);
+      });
+      const voiceBlob = new Blob(chunks, { type: "audio/webm" });
+      const voiceHash = await voiceHashFromAudioBlob(voiceBlob);
+
+      const store = loadStore();
+      const res = await fetch("/api/auth/biometric-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, faceHash, voiceHash, users: store.users }),
+      });
+      const data = await res.json();
+      window.alert(data.faceMatch ? "Face match" : "Face no match");
+      window.alert(data.voiceMatch ? "Voice match" : "Voice no match");
+      if (data.possibleDuplicateUsername) {
+        setStatus(`u look like ${data.possibleDuplicateUsername}`);
+      }
+    } catch {
+      setStatus("Authenticated. Biometric prompt unavailable.");
+    } finally {
+      setEmailBiometricStep("idle");
+      stream?.getTracks().forEach((t) => t.stop());
+      if (previewRef.current) previewRef.current.srcObject = null;
+    }
+  };
+
+  const computeFaceHash = (video: HTMLVideoElement): string => {
+    const w = 16;
+    const h = 16;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(video, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h).data;
+    const gray: number[] = [];
+    for (let i = 0; i < img.length; i += 4) {
+      const r = img[i] ?? 0;
+      const g = img[i + 1] ?? 0;
+      const b = img[i + 2] ?? 0;
+      gray.push(Math.round(r * 0.299 + g * 0.587 + b * 0.114));
+    }
+    const avg = gray.reduce((sum, v) => sum + v, 0) / gray.length;
+    let bits = "";
+    for (const v of gray) {
+      bits += v >= avg ? "1" : "0";
+    }
+    let hex = "";
+    for (let i = 0; i < bits.length; i += 4) {
+      const nibble = bits.slice(i, i + 4);
+      hex += parseInt(nibble, 2).toString(16);
+    }
+    return hex;
+  };
+
   const recordClip = async (opts: { prompt: string }) => {
     let stream: MediaStream | null = null;
     try {
@@ -55,6 +198,7 @@ export default function SignInPage() {
         previewRef.current.srcObject = stream;
         await previewRef.current.play();
       }
+      const sampleHash = previewRef.current ? computeFaceHash(previewRef.current) : "";
       const mimeType = "video/webm";
       const recorder = new MediaRecorder(stream, { mimeType });
       const chunks: BlobPart[] = [];
@@ -79,7 +223,7 @@ export default function SignInPage() {
         window.setTimeout(() => recorder.stop(), 3000);
       });
       const blob = new Blob(chunks, { type: mimeType });
-      return await new Promise<string>((resolve) => {
+      const clip = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
           const result = (reader.result as string) ?? "";
@@ -87,6 +231,7 @@ export default function SignInPage() {
         };
         reader.readAsDataURL(blob);
       });
+      return { clip, faceHash: sampleHash };
     } finally {
       stream?.getTracks().forEach((track) => track.stop());
       if (previewRef.current) previewRef.current.srcObject = null;
@@ -98,10 +243,13 @@ export default function SignInPage() {
     setRecording(true);
     const existing = loadStore();
     let faceClip = "";
+    let faceHash = "";
     try {
-      faceClip = await recordClip({
+      const recorded = await recordClip({
         prompt: "Face step: look straight at camera with neutral expression.",
       });
+      faceClip = recorded.clip;
+      faceHash = recorded.faceHash;
     } catch {
       faceClip = btoa(`${Date.now()}-${Math.random()}-face`);
     }
@@ -110,7 +258,7 @@ export default function SignInPage() {
     const res = await fetch("/api/auth/clip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ faceClip, users: existing.users }),
+      body: JSON.stringify({ faceClip, faceHash, users: existing.users }),
     });
     const data = await res.json();
 
@@ -250,6 +398,7 @@ export default function SignInPage() {
       const uid = cred.user.uid;
       const profile = await resolveFirebaseEmailProfile(uid, cred.user.email);
       await persistFirebaseEmailProfile(profile);
+      await runEmailBiometricCheck(profile.id);
       completeAuth(profile, createdAccount);
     } catch (e: unknown) {
       const err = e as { code?: string };
@@ -441,6 +590,19 @@ export default function SignInPage() {
                 Back to sign in
               </button>
             </>
+          )}
+          {emailBiometricStep !== "idle" && (
+            <div className="space-y-2 rounded border border-slate-700 bg-slate-900/60 p-3">
+              <p className="text-center text-xs text-slate-300">
+                {emailBiometricStep === "face" ? "Checking face..." : 'Listening for "open sesame"...'}
+              </p>
+              <video
+                ref={previewRef}
+                muted
+                playsInline
+                className="h-40 w-full rounded border border-slate-700 bg-black object-cover"
+              />
+            </div>
           )}
         </div>
       )}

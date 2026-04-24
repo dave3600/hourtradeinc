@@ -9,8 +9,12 @@ export type UserProfile = {
   biometricFingerprint?: string;
   /** Face fingerprint used as biometric account identifier (user id side). */
   biometricFaceFingerprint?: string;
+  /** Recent face hashes for tolerance-based matching on this account. */
+  biometricFaceHashes?: string[];
   /** Voice fingerprint used as biometric password (second factor). */
   biometricVoiceFingerprint?: string;
+  /** Recent voice hashes for tolerance-based matching on this account. */
+  biometricVoiceHashes?: string[];
   /** Manual password digest used with face-id sign-in mode. */
   biometricPasswordDigest?: string;
   /** Legacy: local-only email password digest. New email accounts use Firebase Auth instead. */
