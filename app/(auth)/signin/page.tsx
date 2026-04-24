@@ -20,7 +20,6 @@ export default function SignInPage() {
   const [seedInput, setSeedInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
-  const [clipPassword, setClipPassword] = useState("");
   const [emailForgot, setEmailForgot] = useState(false);
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
@@ -43,15 +42,6 @@ export default function SignInPage() {
     saveStore(nextStore);
     setStatus(created ? "Account created and authenticated." : "Authenticated.");
     router.push("/camera");
-  };
-
-  const digestPassword = async (password: string) => {
-    const enc = new TextEncoder();
-    const data = enc.encode(password);
-    const buf = await crypto.subtle.digest("SHA-256", data);
-    return Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
   };
 
   const recordClip = async (opts: { prompt: string }) => {
@@ -105,14 +95,6 @@ export default function SignInPage() {
 
   const handleClipAuth = async () => {
     if (recording) return;
-    if (!clipPassword.trim()) {
-      setStatus("Enter your password for face sign-in.");
-      return;
-    }
-    if (clipPassword.length < 4) {
-      setStatus("Password must be at least 4 characters.");
-      return;
-    }
     setRecording(true);
     const existing = loadStore();
     let faceClip = "";
@@ -124,18 +106,18 @@ export default function SignInPage() {
       faceClip = btoa(`${Date.now()}-${Math.random()}-face`);
     }
 
-    const passwordDigest = await digestPassword(clipPassword);
-    setStatus("Matching face + password...");
+    setStatus("Matching face...");
     const res = await fetch("/api/auth/clip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ faceClip, passwordDigest, users: existing.users }),
+      body: JSON.stringify({ faceClip, users: existing.users }),
     });
     const data = await res.json();
 
     const store = loadStore();
     const incomingUser = data.user;
     if (incomingUser) {
+      window.alert(data?.matched ? "Match" : "No match - account created");
       const exists = store.users.some((u) => u.id === incomingUser.id);
       const users = exists
         ? store.users.map((u) => (u.id === incomingUser.id ? incomingUser : u))
@@ -146,20 +128,15 @@ export default function SignInPage() {
         currentUserId: incomingUser.id,
       };
       saveStore(nextStore);
-      setStatus(data.created ? "New face account created." : "Face + password verified. Authenticated.");
+      setStatus(data?.matched ? "Face matched. Authenticated." : "No match found. New account created and authenticated.");
       setRecording(false);
       setClipCountdown(null);
       setClipPhase("idle");
       router.push("/camera");
       return;
     }
-    if (data?.error === "password_mismatch") {
-      setStatus("Face matched, but password is incorrect.");
-    } else if (data?.error === "password_required") {
-      setStatus("Password is required.");
-    } else {
-      setStatus("Authentication failed. Try again.");
-    }
+    window.alert("No match");
+    setStatus("No face match found.");
     setRecording(false);
     setClipCountdown(null);
     setClipPhase("idle");
@@ -318,11 +295,10 @@ export default function SignInPage() {
           onClick={() => {
             setMode("clip");
             setEmailPassword("");
-            setClipPassword("");
             clearEmailForgotFields();
           }}
         >
-          Sign in / Sign up (Face + Password)
+          Sign in / Sign up (Face)
         </button>
         <button
           className={`rounded px-3 py-2 ${mode === "seed" ? "bg-cyan-500 text-black" : "bg-slate-800 text-white"}`}
@@ -348,27 +324,17 @@ export default function SignInPage() {
       {mode === "clip" && (
         <>
           <p className="max-w-md text-center text-sm text-slate-300">
-            Face identifies your account (user ID). You manually enter your password to finish sign-in.
+            Face-only match mode: if your face matches an existing account, you sign in. If not, you'll see "No match."
           </p>
           <div className="w-full max-w-md rounded border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200">
-            <p>1) Enter your password below.</p>
-            <p>2) Look directly at the camera lens (neutral expression, good lighting).</p>
-            <p>3) Wait for face + password verification.</p>
+            <p>1) Look directly at the camera lens (neutral expression, good lighting).</p>
+            <p>2) Keep still during the 3-second capture.</p>
+            <p>3) You will get a popup: Match or No match.</p>
             {clipPhase !== "idle" && <p className="mt-2 text-center text-cyan-300">Current step: {clipPhase.toUpperCase()}</p>}
             {clipCountdown !== null && (
               <p className="mt-2 text-center text-lg font-bold text-cyan-300">Recording in {clipCountdown}</p>
             )}
           </div>
-          <input
-            id="clipPassword"
-            name="clipPassword"
-            type="password"
-            autoComplete="current-password"
-            className="w-full max-w-md rounded bg-slate-800 p-3 text-sm"
-            placeholder="Enter face sign-in password"
-            value={clipPassword}
-            onChange={(e) => setClipPassword(e.target.value)}
-          />
           <video
             ref={previewRef}
             muted
@@ -380,7 +346,7 @@ export default function SignInPage() {
             onClick={handleClipAuth}
             disabled={recording}
           >
-            {recording ? "Capturing face..." : "Sign In / Sign Up (Face + Password)"}
+            {recording ? "Capturing face..." : "Sign In / Sign Up (Face)"}
           </button>
         </>
       )}

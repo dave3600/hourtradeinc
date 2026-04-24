@@ -16,7 +16,7 @@ function randomUsername() {
 }
 
 export async function POST(req: Request) {
-  const { clip, faceClip, users = [], passwordDigest } = await req.json();
+  const { clip, faceClip, users = [] } = await req.json();
   const faceSource = faceClip || clip || "";
   const faceFingerprint = makeClipFingerprint(faceSource);
   const result = matchClipToUsers(faceSource, users as UserProfile[]);
@@ -35,12 +35,6 @@ export async function POST(req: Request) {
   }
 
   if (!matchedUser) {
-    if (!passwordDigest) {
-      return NextResponse.json(
-        { error: "password_required", message: "Manual password is required." },
-        { status: 400 },
-      );
-    }
     matchedUser = {
       id: createUserId(),
       walletAddress: Wallet.createRandom().address,
@@ -48,38 +42,17 @@ export async function POST(req: Request) {
       seedPhrase: generateMnemonic(),
       biometricFingerprint: faceFingerprint,
       biometricFaceFingerprint: faceFingerprint,
-      biometricPasswordDigest: passwordDigest,
       createdAt: new Date().toISOString(),
       joinDate: new Date().toISOString(),
     };
     created = true;
-  } else {
-    if (!passwordDigest) {
-      return NextResponse.json(
-        { error: "password_required", message: "Manual password is required." },
-        { status: 400 },
-      );
-    }
-    if (matchedUser.biometricPasswordDigest && matchedUser.biometricPasswordDigest !== passwordDigest) {
-      return NextResponse.json(
-        {
-          matchedUserId: matchedUser.id,
-          user: null,
-          created: false,
-          confidence: result.confidence,
-          fingerprint: faceFingerprint,
-          error: "password_mismatch",
-        },
-        { status: 401 },
-      );
-    }
-    matchedUser = {
-      ...matchedUser,
-      biometricFingerprint: faceFingerprint,
-      biometricFaceFingerprint: faceFingerprint,
-      biometricPasswordDigest: matchedUser.biometricPasswordDigest ?? passwordDigest,
-    };
   }
+
+  matchedUser = {
+    ...matchedUser,
+    biometricFingerprint: faceFingerprint,
+    biometricFaceFingerprint: faceFingerprint,
+  };
 
   if (adminDb) {
     await adminDb.collection("users").doc(matchedUser.id).set(matchedUser, { merge: true });
@@ -95,6 +68,7 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({
+    matched: !created,
     matchedUserId: matchedUser.id,
     user: matchedUser,
     created,
