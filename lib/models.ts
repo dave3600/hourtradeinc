@@ -5,6 +5,8 @@ export type UserProfile = {
   email?: string;
   /** Firebase Auth UID when this profile was created or linked via email (online). */
   firebaseUid?: string;
+  /** Clip-based auth fingerprint from successful biometric enrollment/match. */
+  biometricFingerprint?: string;
   /** Legacy: local-only email password digest. New email accounts use Firebase Auth instead. */
   emailPasswordDigest?: string;
   seedPhrase: string;

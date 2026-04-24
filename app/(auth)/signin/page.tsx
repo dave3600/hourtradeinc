@@ -23,6 +23,7 @@ export default function SignInPage() {
   const [emailForgot, setEmailForgot] = useState(false);
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
+  const [clipCountdown, setClipCountdown] = useState<number | null>(null);
 
   const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -67,6 +68,17 @@ export default function SignInPage() {
           }
         };
         recorder.onstop = () => resolve();
+        setStatus('Get ready... Look straight at the camera and clearly say: "hOurTrade prove my work".');
+        setClipCountdown(3);
+        const countdownInterval = window.setInterval(() => {
+          setClipCountdown((prev) => {
+            if (!prev || prev <= 1) {
+              window.clearInterval(countdownInterval);
+              return null;
+            }
+            return prev - 1;
+          });
+        }, 1000);
         recorder.start();
         window.setTimeout(() => recorder.stop(), 3000);
       });
@@ -109,12 +121,14 @@ export default function SignInPage() {
         currentUserId: incomingUser.id,
       };
       saveStore(nextStore);
-      setStatus("Authenticated.");
+      setStatus(data.created ? "New biometric account created." : "Biometric match found. Authenticated.");
       setRecording(false);
+      setClipCountdown(null);
       router.push("/camera");
       return;
     }
     setRecording(false);
+    setClipCountdown(null);
     setStatus("Authentication failed. Try again.");
   };
 
@@ -300,8 +314,17 @@ export default function SignInPage() {
       {mode === "clip" && (
         <>
           <p className="max-w-md text-center text-sm text-slate-300">
-            Tap once to capture a 3-second audio/video signature. Existing match signs in, no match creates a new hOurTrade account.
+            Biometric sign-in guide: hold phone at eye level, face centered, steady lighting, and say
+            <span className="font-semibold text-cyan-300"> "hOurTrade prove my work"</span> during the 3-second capture.
           </p>
+          <div className="w-full max-w-md rounded border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200">
+            <p>1) Look directly at the camera lens (not the screen).</p>
+            <p>2) Keep your head still and speak the phrase once, clearly.</p>
+            <p>3) Wait for "Matching signature..." before moving.</p>
+            {clipCountdown !== null && (
+              <p className="mt-2 text-center text-lg font-bold text-cyan-300">Recording in {clipCountdown}</p>
+            )}
+          </div>
           <video
             ref={previewRef}
             muted
