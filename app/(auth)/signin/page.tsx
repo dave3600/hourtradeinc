@@ -16,6 +16,7 @@ import { persistFirebaseEmailProfile, resolveFirebaseEmailProfile } from "@/lib/
 export default function SignInPage() {
   const router = useRouter();
   const previewRef = useRef<HTMLVideoElement | null>(null);
+  const activeStreamRef = useRef<MediaStream | null>(null);
   const [mode, setMode] = useState<"clip" | "seed" | "email">("clip");
   const [seedInput, setSeedInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
@@ -48,6 +49,41 @@ export default function SignInPage() {
     throw lastError;
   };
 
+  const openCameraPreview = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus("Camera is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await openUserCamera();
+      activeStreamRef.current?.getTracks().forEach((t) => t.stop());
+      activeStreamRef.current = stream;
+      if (previewRef.current) {
+        previewRef.current.srcObject = stream;
+        await previewRef.current.play();
+      }
+      setStatus("Camera is ready. Click Sign In / Sign Up (Face).");
+    } catch (e) {
+      const err = e as { name?: string };
+      if (err.name === "NotAllowedError") {
+        setStatus("Camera permission denied. Please allow camera access in browser settings.");
+      } else if (err.name === "NotFoundError") {
+        setStatus("No camera found on this device.");
+      } else if (err.name === "NotReadableError") {
+        setStatus("Camera is busy in another app/tab. Close other camera apps and try again.");
+      } else {
+        setStatus("Unable to open camera preview.");
+      }
+    }
+  };
+
+  const closeCameraPreview = () => {
+    activeStreamRef.current?.getTracks().forEach((t) => t.stop());
+    activeStreamRef.current = null;
+    if (previewRef.current) previewRef.current.srcObject = null;
+    setStatus("Camera closed.");
+  };
+
   const showBlockingPrompt = (message: string) =>
     new Promise<void>((resolve) => {
       setPromptMessage(message);
@@ -62,6 +98,9 @@ export default function SignInPage() {
   };
 
   const completeAuth = (user: ReturnType<typeof loadStore>["users"][number], created: boolean) => {
+    activeStreamRef.current?.getTracks().forEach((t) => t.stop());
+    activeStreamRef.current = null;
+    if (previewRef.current) previewRef.current.srcObject = null;
     const store = loadStore();
     const exists = store.users.some((u) => u.id === user.id);
     const users = exists
@@ -326,11 +365,13 @@ export default function SignInPage() {
 
   const recordClip = async (opts: { prompt: string }) => {
     let stream: MediaStream | null = null;
+    let usingTemporaryStream = false;
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("Camera is not supported in this browser.");
       }
-      stream = await openUserCamera();
+      stream = activeStreamRef.current ?? (await openUserCamera());
+      usingTemporaryStream = !activeStreamRef.current;
       if (previewRef.current) {
         previewRef.current.srcObject = stream;
         await previewRef.current.play();
@@ -373,8 +414,12 @@ export default function SignInPage() {
       });
       return { clip, faceHash: sampleHash, faceImageDataUrl: sampleImage };
     } finally {
-      stream?.getTracks().forEach((track) => track.stop());
-      if (previewRef.current) previewRef.current.srcObject = null;
+      if (usingTemporaryStream) {
+        stream?.getTracks().forEach((track) => track.stop());
+        if (previewRef.current) previewRef.current.srcObject = null;
+      } else if (previewRef.current && activeStreamRef.current) {
+        previewRef.current.srcObject = activeStreamRef.current;
+      }
     }
   };
 
@@ -638,6 +683,14 @@ export default function SignInPage() {
           <p className="max-w-md text-center text-sm text-slate-300">
             Face-only match mode: if your face matches an existing account, you sign in. If not, you'll see "No match."
           </p>
+          <div className="flex gap-2">
+            <button className="rounded bg-slate-700 px-4 py-2 text-sm" onClick={() => void openCameraPreview()}>
+              Open Cam
+            </button>
+            <button className="rounded bg-slate-700 px-4 py-2 text-sm" onClick={closeCameraPreview}>
+              Close Cam
+            </button>
+          </div>
           <div className="w-full max-w-md rounded border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200">
             <p>1) Look directly at the camera lens (neutral expression, good lighting).</p>
             <p>2) Keep still during the 3-second capture.</p>
