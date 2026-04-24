@@ -11,6 +11,8 @@ export type UserProfile = {
   biometricFaceFingerprint?: string;
   /** Voice fingerprint used as biometric password (second factor). */
   biometricVoiceFingerprint?: string;
+  /** Manual password digest used with face-id sign-in mode. */
+  biometricPasswordDigest?: string;
   /** Legacy: local-only email password digest. New email accounts use Firebase Auth instead. */
   emailPasswordDigest?: string;
   seedPhrase: string;

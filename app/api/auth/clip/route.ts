@@ -16,16 +16,13 @@ function randomUsername() {
 }
 
 export async function POST(req: Request) {
-  const { clip, faceClip, voiceClip, users = [] } = await req.json();
+  const { clip, faceClip, users = [], passwordDigest } = await req.json();
   const faceSource = faceClip || clip || "";
-  const voiceSource = voiceClip || clip || "";
   const faceFingerprint = makeClipFingerprint(faceSource);
-  const voiceFingerprint = makeClipFingerprint(voiceSource);
   const result = matchClipToUsers(faceSource, users as UserProfile[]);
 
   let matchedUser = result.matchedUser;
   let created = false;
-  let voiceAccepted = true;
   if (!matchedUser && adminDb) {
     const signatureSnap = await adminDb.collection("auth_signatures").doc(faceFingerprint).get();
     const signatureUserId = signatureSnap.exists ? (signatureSnap.data()?.userId as string | undefined) : undefined;
@@ -38,6 +35,12 @@ export async function POST(req: Request) {
   }
 
   if (!matchedUser) {
+    if (!passwordDigest) {
+      return NextResponse.json(
+        { error: "password_required", message: "Manual password is required." },
+        { status: 400 },
+      );
+    }
     matchedUser = {
       id: createUserId(),
       walletAddress: Wallet.createRandom().address,
@@ -45,36 +48,37 @@ export async function POST(req: Request) {
       seedPhrase: generateMnemonic(),
       biometricFingerprint: faceFingerprint,
       biometricFaceFingerprint: faceFingerprint,
-      biometricVoiceFingerprint: voiceFingerprint,
+      biometricPasswordDigest: passwordDigest,
       createdAt: new Date().toISOString(),
       joinDate: new Date().toISOString(),
     };
     created = true;
   } else {
-    const previousVoice = matchedUser.biometricVoiceFingerprint;
-    if (previousVoice && previousVoice !== voiceFingerprint) {
-      voiceAccepted = false;
+    if (!passwordDigest) {
+      return NextResponse.json(
+        { error: "password_required", message: "Manual password is required." },
+        { status: 400 },
+      );
+    }
+    if (matchedUser.biometricPasswordDigest && matchedUser.biometricPasswordDigest !== passwordDigest) {
+      return NextResponse.json(
+        {
+          matchedUserId: matchedUser.id,
+          user: null,
+          created: false,
+          confidence: result.confidence,
+          fingerprint: faceFingerprint,
+          error: "password_mismatch",
+        },
+        { status: 401 },
+      );
     }
     matchedUser = {
       ...matchedUser,
       biometricFingerprint: faceFingerprint,
       biometricFaceFingerprint: faceFingerprint,
-      biometricVoiceFingerprint: voiceAccepted ? voiceFingerprint : matchedUser.biometricVoiceFingerprint,
+      biometricPasswordDigest: matchedUser.biometricPasswordDigest ?? passwordDigest,
     };
-  }
-
-  if (!voiceAccepted) {
-    return NextResponse.json(
-      {
-        matchedUserId: matchedUser.id,
-        user: null,
-        created: false,
-        confidence: result.confidence,
-        fingerprint: faceFingerprint,
-        error: "voice_mismatch",
-      },
-      { status: 401 },
-    );
   }
 
   if (adminDb) {

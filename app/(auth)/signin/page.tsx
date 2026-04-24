@@ -20,11 +20,12 @@ export default function SignInPage() {
   const [seedInput, setSeedInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
+  const [clipPassword, setClipPassword] = useState("");
   const [emailForgot, setEmailForgot] = useState(false);
   const [status, setStatus] = useState("");
   const [recording, setRecording] = useState(false);
   const [clipCountdown, setClipCountdown] = useState<number | null>(null);
-  const [clipPhase, setClipPhase] = useState<"idle" | "face" | "voice">("idle");
+  const [clipPhase, setClipPhase] = useState<"idle" | "face">("idle");
 
   const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -44,18 +45,27 @@ export default function SignInPage() {
     router.push("/camera");
   };
 
-  const recordClip = async (opts: { video: boolean; audio: boolean; phase: "face" | "voice"; prompt: string }) => {
+  const digestPassword = async (password: string) => {
+    const enc = new TextEncoder();
+    const data = enc.encode(password);
+    const buf = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  };
+
+  const recordClip = async (opts: { prompt: string }) => {
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: opts.video ? { facingMode: "user" } : false,
-        audio: opts.audio,
+        video: { facingMode: "user" },
+        audio: false,
       });
-      if (opts.video && previewRef.current) {
+      if (previewRef.current) {
         previewRef.current.srcObject = stream;
         await previewRef.current.play();
       }
-      const mimeType = opts.video ? "video/webm" : "audio/webm";
+      const mimeType = "video/webm";
       const recorder = new MediaRecorder(stream, { mimeType });
       const chunks: BlobPart[] = [];
       await new Promise<void>((resolve) => {
@@ -64,7 +74,7 @@ export default function SignInPage() {
         };
         recorder.onstop = () => resolve();
         setStatus(opts.prompt);
-        setClipPhase(opts.phase);
+        setClipPhase("face");
         setClipCountdown(3);
         const countdownInterval = window.setInterval(() => {
           setClipCountdown((prev) => {
@@ -95,33 +105,31 @@ export default function SignInPage() {
 
   const handleClipAuth = async () => {
     if (recording) return;
+    if (!clipPassword.trim()) {
+      setStatus("Enter your password for face sign-in.");
+      return;
+    }
+    if (clipPassword.length < 4) {
+      setStatus("Password must be at least 4 characters.");
+      return;
+    }
     setRecording(true);
     const existing = loadStore();
     let faceClip = "";
-    let voiceClip = "";
     try {
       faceClip = await recordClip({
-        phase: "face",
-        video: true,
-        audio: false,
         prompt: "Face step: look straight at camera with neutral expression.",
-      });
-      voiceClip = await recordClip({
-        phase: "voice",
-        video: false,
-        audio: true,
-        prompt: 'Voice step: say clearly "hOurTrade prove my work" once.',
       });
     } catch {
       faceClip = btoa(`${Date.now()}-${Math.random()}-face`);
-      voiceClip = btoa(`${Date.now()}-${Math.random()}-voice`);
     }
 
-    setStatus("Matching face and voice...");
+    const passwordDigest = await digestPassword(clipPassword);
+    setStatus("Matching face + password...");
     const res = await fetch("/api/auth/clip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ faceClip, voiceClip, users: existing.users }),
+      body: JSON.stringify({ faceClip, passwordDigest, users: existing.users }),
     });
     const data = await res.json();
 
@@ -138,15 +146,17 @@ export default function SignInPage() {
         currentUserId: incomingUser.id,
       };
       saveStore(nextStore);
-      setStatus(data.created ? "New biometric account created." : "Face + voice verified. Authenticated.");
+      setStatus(data.created ? "New face account created." : "Face + password verified. Authenticated.");
       setRecording(false);
       setClipCountdown(null);
       setClipPhase("idle");
       router.push("/camera");
       return;
     }
-    if (data?.error === "voice_mismatch") {
-      setStatus("Face matched, but voice password did not match. Please try again.");
+    if (data?.error === "password_mismatch") {
+      setStatus("Face matched, but password is incorrect.");
+    } else if (data?.error === "password_required") {
+      setStatus("Password is required.");
     } else {
       setStatus("Authentication failed. Try again.");
     }
@@ -308,10 +318,11 @@ export default function SignInPage() {
           onClick={() => {
             setMode("clip");
             setEmailPassword("");
+            setClipPassword("");
             clearEmailForgotFields();
           }}
         >
-          Sign in / Sign up (3s Clip)
+          Sign in / Sign up (Face + Password)
         </button>
         <button
           className={`rounded px-3 py-2 ${mode === "seed" ? "bg-cyan-500 text-black" : "bg-slate-800 text-white"}`}
@@ -337,19 +348,27 @@ export default function SignInPage() {
       {mode === "clip" && (
         <>
           <p className="max-w-md text-center text-sm text-slate-300">
-            Biometric sign-in is now 2-step:
-            <span className="font-semibold text-cyan-300"> Face (user ID)</span> then
-            <span className="font-semibold text-cyan-300"> Voice phrase (password)</span>.
+            Face identifies your account (user ID). You manually enter your password to finish sign-in.
           </p>
           <div className="w-full max-w-md rounded border border-slate-700 bg-slate-900/70 p-3 text-xs text-slate-200">
-            <p>1) Face step: look directly at the camera lens, neutral expression, good lighting.</p>
-            <p>2) Voice step: say exactly <span className="font-semibold text-cyan-300">"hOurTrade prove my work"</span>.</p>
-            <p>3) Wait for match result before tapping again.</p>
+            <p>1) Enter your password below.</p>
+            <p>2) Look directly at the camera lens (neutral expression, good lighting).</p>
+            <p>3) Wait for face + password verification.</p>
             {clipPhase !== "idle" && <p className="mt-2 text-center text-cyan-300">Current step: {clipPhase.toUpperCase()}</p>}
             {clipCountdown !== null && (
               <p className="mt-2 text-center text-lg font-bold text-cyan-300">Recording in {clipCountdown}</p>
             )}
           </div>
+          <input
+            id="clipPassword"
+            name="clipPassword"
+            type="password"
+            autoComplete="current-password"
+            className="w-full max-w-md rounded bg-slate-800 p-3 text-sm"
+            placeholder="Enter face sign-in password"
+            value={clipPassword}
+            onChange={(e) => setClipPassword(e.target.value)}
+          />
           <video
             ref={previewRef}
             muted
@@ -361,7 +380,7 @@ export default function SignInPage() {
             onClick={handleClipAuth}
             disabled={recording}
           >
-            {recording ? "Capturing biometrics..." : "Sign In / Sign Up (Face + Voice)"}
+            {recording ? "Capturing face..." : "Sign In / Sign Up (Face + Password)"}
           </button>
         </>
       )}
