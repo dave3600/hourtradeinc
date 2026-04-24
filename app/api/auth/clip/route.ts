@@ -33,11 +33,6 @@ export async function POST(req: Request) {
     }
   }
 
-  // Practical fallback: when there's only one local account on this device, prefer reusing it.
-  if (!matchedUser && Array.isArray(users) && users.length === 1) {
-    matchedUser = users[0] as UserProfile;
-  }
-
   if (!matchedUser) {
     matchedUser = {
       id: createUserId(),
