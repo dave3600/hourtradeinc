@@ -31,6 +31,23 @@ export default function SignInPage() {
 
   const normalizeSeedPhrase = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+  const openUserCamera = async () => {
+    const attempts: MediaStreamConstraints[] = [
+      { video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
+      { video: { facingMode: "user" }, audio: false },
+      { video: true, audio: false },
+    ];
+    let lastError: unknown = null;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError;
+  };
+
   const showBlockingPrompt = (message: string) =>
     new Promise<void>((resolve) => {
       setPromptMessage(message);
@@ -310,18 +327,20 @@ export default function SignInPage() {
   const recordClip = async (opts: { prompt: string }) => {
     let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      });
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Camera is not supported in this browser.");
+      }
+      stream = await openUserCamera();
       if (previewRef.current) {
         previewRef.current.srcObject = stream;
         await previewRef.current.play();
       }
       const sampleHash = previewRef.current ? computeFaceHash(previewRef.current) : "";
       const sampleImage = previewRef.current ? faceImageFromFrame(previewRef.current) : "";
-      const mimeType = "video/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const preferredType = "video/webm";
+      const mediaRecorderOptions =
+        typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(preferredType) ? { mimeType: preferredType } : undefined;
+      const recorder = mediaRecorderOptions ? new MediaRecorder(stream, mediaRecorderOptions) : new MediaRecorder(stream);
       const chunks: BlobPart[] = [];
       await new Promise<void>((resolve) => {
         recorder.ondataavailable = (event) => {
@@ -343,7 +362,7 @@ export default function SignInPage() {
         recorder.start();
         window.setTimeout(() => recorder.stop(), 3000);
       });
-      const blob = new Blob(chunks, { type: mimeType });
+      const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
       const clip = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -416,8 +435,17 @@ export default function SignInPage() {
       }
       await showBlockingPrompt("No match");
       setStatus("No face match found.");
-    } catch {
-      setStatus("Camera sign-in failed. Please allow camera access and try again.");
+    } catch (e) {
+      const err = e as { name?: string; message?: string };
+      if (err.name === "NotAllowedError") {
+        setStatus("Camera permission denied. Please allow camera access in browser settings.");
+      } else if (err.name === "NotFoundError") {
+        setStatus("No camera found on this device.");
+      } else if (err.name === "NotReadableError") {
+        setStatus("Camera is busy in another app/tab. Close other camera apps and try again.");
+      } else {
+        setStatus(err.message || "Camera sign-in failed. Please allow camera access and try again.");
+      }
     } finally {
       setRecording(false);
       setClipCountdown(null);
