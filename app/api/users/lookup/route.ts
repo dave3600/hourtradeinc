@@ -35,6 +35,16 @@ export async function GET(req: Request) {
   const db = adminDb;
   const qs = q.toLowerCase();
 
+  // Direct user id lookup first.
+  if (/^user_[a-zA-Z0-9]+$/.test(q)) {
+    const doc = await db.collection("users").doc(q).get();
+    if (doc.exists) {
+      const out = payloadFromDoc(doc.id, doc.data() as Record<string, unknown>);
+      if (out) return NextResponse.json(out);
+    }
+    return NextResponse.json({ found: false });
+  }
+
   if (EMAIL_RE.test(q)) {
     const snap = await db.collection("users").where("email", "==", qs).limit(5).get();
     if (!snap.empty) {

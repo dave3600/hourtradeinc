@@ -21,11 +21,9 @@ export function CoinLifecyclePanel() {
   const [error, setError] = useState<string | null>(null);
   const user = store.users.find((u) => u.id === store.currentUserId);
   const myCoins = user ? activeCoinsHeldByUser(store.coins, user) : [];
-  const pendingTransfers = store.transfers.filter(
-    (tx) =>
-      tx.status === "pending" &&
-      user &&
-      (tx.recipientWallet.toLowerCase() === user.walletAddress.toLowerCase() || tx.senderId === user.id),
+  const senderPendingTransfers = store.transfers.filter((tx) => tx.status === "pending" && user && tx.senderId === user.id);
+  const recipientPendingTransfers = store.transfers.filter(
+    (tx) => tx.status === "pending" && user && tx.recipientWallet.toLowerCase() === user.walletAddress.toLowerCase(),
   );
   const reviewedTransfers = store.transfers.filter(
     (tx) =>
@@ -63,7 +61,7 @@ export function CoinLifecyclePanel() {
     const resolved = await resolveRecipient(recipientInput, store, user.walletAddress, idToken);
     if (!resolved) {
       setError(
-        "Enter another user's wallet (0x + 40 hex), username, or email. Unknown addresses must exist in Firebase (email sign-in). You cannot send to yourself.",
+        "Enter another user's user id, email, username, or wallet address (0x + 40 hex). You cannot send to yourself.",
       );
       return;
     }
@@ -140,27 +138,32 @@ export function CoinLifecyclePanel() {
     });
   };
 
-  const review = (id: string, accept: boolean) => {
+  const updateTransferStatus = (id: string, status: "accepted" | "denied" | "cancelled") => {
     const nextTransfers = store.transfers.map((t) =>
       t.id === id
-        ? { ...t, status: accept ? ("accepted" as const) : ("denied" as const) }
+        ? { ...t, status }
         : t,
     );
     const tx = nextTransfers.find((t) => t.id === id);
     let nextCoins = store.coins;
     if (tx) {
-      nextCoins = store.coins.map((c) =>
-        c.id === tx.childCoinId
-          ? { ...c, status: accept ? "active" : "cancelled" }
-          : c,
-      );
+      nextCoins = store.coins.map((c) => {
+        if (c.id === tx.childCoinId) {
+          return { ...c, status: status === "accepted" ? "active" : "cancelled" };
+        }
+        // Refund sender if transfer is denied/cancelled.
+        if ((status === "denied" || status === "cancelled") && tx.sourceCoinIds.includes(c.id)) {
+          return { ...c, amountMs: c.amountMs + tx.amountMs };
+        }
+        return c;
+      });
     }
     const nextStore = { ...store, transfers: nextTransfers, coins: nextCoins };
     saveStore(nextStore);
     void fetch("/api/coins/review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transferId: id, status: accept ? "accepted" : "denied" }),
+      body: JSON.stringify({ transferId: id, status }),
     });
   };
 
@@ -172,7 +175,7 @@ export function CoinLifecyclePanel() {
           id="recipientWallet"
           name="recipientWallet"
           className="w-full rounded bg-slate-800 p-2 text-sm"
-          placeholder="Recipient: wallet (0x…40 hex), username, or email"
+          placeholder="Recipient: user id, email, username, or wallet (0x...40 hex)"
           value={recipientInput}
           onChange={(e) => setRecipientInput(e.target.value)}
         />
@@ -267,22 +270,33 @@ export function CoinLifecyclePanel() {
 
       <section className="space-y-2 rounded border border-slate-700 p-3">
         <h3 className="font-semibold">Coin Transfer Review</h3>
-        {pendingTransfers.map((tx) => (
+        {senderPendingTransfers.map((tx) => (
           <div key={tx.id} className="rounded bg-slate-800 p-2 text-xs">
             <div>{tx.amountMs} ms {"->"} {tx.recipientWallet}</div>
             <div>Status: {tx.status}</div>
             <div className="mt-2 flex gap-2">
-              <button className="rounded bg-green-600 px-2 py-1" onClick={() => review(tx.id, true)}>
+              <button className="rounded bg-red-600 px-2 py-1" onClick={() => updateTransferStatus(tx.id, "cancelled")}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ))}
+        {recipientPendingTransfers.map((tx) => (
+          <div key={tx.id} className="rounded bg-slate-800 p-2 text-xs">
+            <div>{tx.amountMs} ms {"->"} {tx.recipientWallet}</div>
+            <div>Status: {tx.status}</div>
+            <div className="mt-2 flex gap-2">
+              <button className="rounded bg-green-600 px-2 py-1" onClick={() => updateTransferStatus(tx.id, "accepted")}>
                 Accept
               </button>
-              <button className="rounded bg-red-600 px-2 py-1" onClick={() => review(tx.id, false)}>
+              <button className="rounded bg-red-600 px-2 py-1" onClick={() => updateTransferStatus(tx.id, "denied")}>
                 Deny
               </button>
             </div>
           </div>
         ))}
-        {pendingTransfers.length === 0 && (
-          <p className="text-xs text-slate-400">No pending transfers to review.</p>
+        {senderPendingTransfers.length === 0 && recipientPendingTransfers.length === 0 && (
+          <p className="text-xs text-slate-400">No pending transfers.</p>
         )}
 
         {reviewedTransfers.length > 0 && (

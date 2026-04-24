@@ -19,6 +19,12 @@ export function resolveRecipientLocal(raw: string, store: Store, senderWallet: s
   if (!normalized) return null;
 
   const sw = senderWallet.toLowerCase();
+  const byUserId = store.users.find((u) => u.id === normalized);
+  if (byUserId) {
+    const w = byUserId.walletAddress.toLowerCase();
+    if (w === sw) return null;
+    return { walletAddress: w, userId: byUserId.id };
+  }
 
   const byEmail = store.users.find((u) => (u.email ?? "").toLowerCase() === normalized.toLowerCase());
   if (byEmail) {
@@ -71,7 +77,7 @@ export async function resolveRecipientRemote(
   return { walletAddress: w, userId: data.userId ?? null };
 }
 
-/** Try local store first, then server lookup for email/username/unknown wallet. */
+/** Try local store first, then server lookup for user id/email/username/unknown wallet. */
 export async function resolveRecipient(
   raw: string,
   store: Store,
