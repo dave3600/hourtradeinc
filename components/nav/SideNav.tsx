@@ -14,10 +14,11 @@ type Props = {
 
 export function SideNav({ open, onClose }: Props) {
   const router = useRouter();
+  const store = loadStore();
+  const user = store.users.find((u) => u.id === store.currentUserId);
   const logout = () => {
     resetCloudSyncState();
     void signOut(firebaseAuth).catch(() => {});
-    const store = loadStore();
     saveStore({ ...store, currentUserId: undefined });
     onClose();
     router.push("/signin");
@@ -30,7 +31,8 @@ export function SideNav({ open, onClose }: Props) {
         className="h-full w-72 bg-slate-900 p-4 text-white"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-xl font-bold">hOurTrade</h2>
+        <h2 className="mb-2 text-xl font-bold">hOurTrade</h2>
+        {user?.email && <p className="mb-3 text-xs text-slate-300">{user.email}</p>}
         <div className="space-y-2 text-sm">
           <Link className="block rounded bg-slate-800 p-2" href="/camera">
             Camera + Job
